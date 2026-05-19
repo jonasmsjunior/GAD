@@ -1,9 +1,7 @@
 import os
+import sys
 import shutil
 import json
-import tkinter as tk
-from tkinter import messagebox, filedialog, ttk
-from tkinter.scrolledtext import ScrolledText
 import threading
 from datetime import datetime
 
@@ -12,696 +10,312 @@ import api
 import anexos
 import services
 
-from tkinter import simpledialog
+# Dynamic fallback import for PySide6 or PyQt6
+try:
+    from PySide6.QtCore import QThread, Signal, Qt, QEventLoop, QTimer
+    from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                                    QLabel, QLineEdit, QPushButton, QCheckBox, QTableWidget, 
+                                    QTableWidgetItem, QTextEdit, QProgressBar, QDialog, QFileDialog, 
+                                    QHeaderView, QMessageBox, QMenu)
+    from PySide6.QtGui import QFont, QColor, QTextCursor, QAction
+except ImportError:
+    from PyQt6.QtCore import QThread, pyqtSignal as Signal, Qt, QEventLoop, QTimer
+    from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                                    QLabel, QLineEdit, QPushButton, QCheckBox, QTableWidget, 
+                                    QTableWidgetItem, QTextEdit, QProgressBar, QDialog, QFileDialog, 
+                                    QHeaderView, QMessageBox, QMenu)
+    from PyQt6.QtGui import QFont, QColor, QTextCursor, QAction
 
-def iniciar_interface():
-    # Instância central de estado
-    ctx = utils.ProtocoloContext()
-    ctx.cancel_event = threading.Event()
-    config = utils.carregar_config()
-    
-    # Variáveis de UI que não são estado de protocolo
-    lbl_progresso = None  # will be replaced by progress_bar later
+# ---------------------------------------------------------------------------
+# QSS Stylesheet - Premium Dark Theme
+# ---------------------------------------------------------------------------
+STYLING = """
+QMainWindow, QDialog {
+    background-color: #121214;
+    color: #e1e1e6;
+}
+QWidget {
+    color: #e1e1e6;
+    font-family: "Segoe UI", "Segoe UI Semibold", sans-serif;
+    font-size: 10pt;
+}
+QLabel {
+    color: #c4c4cc;
+}
+QLabel#lbl_titulo {
+    color: #00ADB5;
+    font-size: 16pt;
+    font-weight: bold;
+}
+QLineEdit {
+    background-color: #202024;
+    border: 1px solid #323238;
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: #ffffff;
+}
+QLineEdit:focus {
+    border: 1px solid #00ADB5;
+}
+QPushButton {
+    background-color: #29292e;
+    border: 1px solid #323238;
+    border-radius: 6px;
+    padding: 7px 16px;
+    font-weight: bold;
+    color: #ffffff;
+    min-height: 18px;
+}
+QPushButton:hover {
+    background-color: #323238;
+    border-color: #00ADB5;
+}
+QPushButton:pressed {
+    background-color: #121214;
+}
+QPushButton:disabled {
+    background-color: #1c1c1e;
+    color: #7c7c8a;
+    border-color: #202024;
+}
 
-    def realizar_consulta():
-        # nonlocal removed – using ctx instead
+/* Accent Buttons */
+QPushButton#btn_consultar {
+    background-color: #00ADB5;
+    color: #121214;
+    border: none;
+}
+QPushButton#btn_consultar:hover {
+    background-color: #00FFF0;
+}
+QPushButton#btn_criar {
+    background-color: #04D361;
+    color: #121214;
+    border: none;
+}
+QPushButton#btn_criar:hover {
+    background-color: #00FF7F;
+}
+QPushButton#btn_recriar {
+    background-color: #E23E3E;
+    color: #ffffff;
+    border: none;
+}
+QPushButton#btn_recriar:hover {
+    background-color: #FF5A5A;
+}
+QPushButton#btn_processar {
+    background-color: #9B59B6;
+    color: #ffffff;
+    border: none;
+}
+QPushButton#btn_processar:hover {
+    background-color: #AF7AC5;
+}
+QPushButton#btn_enviar {
+    background-color: #FF8C00;
+    color: #121214;
+    border: none;
+}
+QPushButton#btn_enviar:hover {
+    background-color: #FFA500;
+}
+QPushButton#btn_cancelar {
+    background-color: #202024;
+    border: 1px solid #E23E3E;
+    color: #E23E3E;
+}
+QPushButton#btn_cancelar:hover {
+    background-color: #E23E3E;
+    color: #ffffff;
+}
 
-        
-        protocolo = entry_protocolo.get().strip()
-        if not protocolo:
-            messagebox.showwarning("Aviso", "Por favor, informe o número do protocolo.")
-            return
+QTableWidget {
+    background-color: #18181b;
+    alternate-background-color: #202024;
+    border: 1px solid #323238;
+    gridline-color: #323238;
+    border-radius: 6px;
+}
+QTableWidget::item:selected {
+    background-color: #29292e;
+    border: 1px solid #00ADB5;
+    color: #ffffff;
+}
+QHeaderView::section {
+    background-color: #202024;
+    color: #c4c4cc;
+    border: 1px solid #323238;
+    padding: 6px;
+    font-weight: bold;
+}
+QProgressBar {
+    background-color: #202024;
+    border: 1px solid #323238;
+    border-radius: 6px;
+    text-align: center;
+    color: #ffffff;
+    font-weight: bold;
+}
+QProgressBar::chunk {
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00ADB5, stop:1 #00FFF0);
+    border-radius: 5px;
+}
+QTextEdit {
+    background-color: #18181b;
+    border: 1px solid #323238;
+    border-radius: 6px;
+    font-family: "Courier New", monospace;
+    font-size: 10pt;
+    padding: 8px;
+    color: #e1e1e6;
+}
+QScrollBar:vertical {
+    background-color: #121214;
+    width: 12px;
+    margin: 0px;
+}
+QScrollBar::handle:vertical {
+    background-color: #29292e;
+    min-height: 20px;
+    border-radius: 6px;
+}
+QScrollBar::handle:vertical:hover {
+    background-color: #323238;
+}
+QCheckBox {
+    spacing: 8px;
+}
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    background-color: #202024;
+    border: 1px solid #323238;
+    border-radius: 4px;
+}
+QCheckBox::indicator:hover {
+    border-color: #00ADB5;
+}
+QCheckBox::indicator:checked {
+    background-color: #00ADB5;
+    border: 4px solid #202024;
+}
+"""
+
+# ---------------------------------------------------------------------------
+# Background Workers (QThread implementations)
+# ---------------------------------------------------------------------------
+
+class QueryWorker(QThread):
+    finished_signal = Signal(bool, str, object, list, list)
+
+    def __init__(self, protocolo):
+        super().__init__()
+        self.protocolo = protocolo
+
+    def run(self):
+        try:
+            sucesso, resultado, dados_brutos, chaves, tabela = api.consultar_protocolo(self.protocolo)
+            self.finished_signal.emit(sucesso, resultado, dados_brutos, chaves, tabela)
+        except Exception as e:
+            self.finished_signal.emit(False, f"Erro inesperado na consulta: {e}", None, [], [])
+
+
+class ProcessWorker(QThread):
+    progress_signal = Signal(int, str)
+    log_signal = Signal(str, str) # (message, type) -> success, error, warning, info
+    finished_signal = Signal(bool, str)
+
+    def __init__(self, ctx, auto_enviar, parent_window):
+        super().__init__()
+        self.ctx = ctx
+        self.auto_enviar = auto_enviar
+        self.parent_window = parent_window
+
+    def progresso_callback(self, pct, desc):
+        etapa_str = ""
+        if pct == 25:
+            etapa_str = "[Etapa 1/4] "
+        elif pct == 50:
+            etapa_str = "[Etapa 2/4] "
+        elif pct == 75:
+            etapa_str = "[Etapa 3/4] "
+        elif pct == 100:
+            etapa_str = "[Etapa 4/4] "
+        self.progress_signal.emit(pct, f"{etapa_str}{desc}")
+        self.log_signal.emit(f"-> {etapa_str}{desc} ... [OK]", "info")
+
+    def run(self):
+        try:
+            self.log_signal.emit("Iniciando processamento de anexos...\n", "info")
+            services.processar_anexos(self.ctx, callback_progresso=self.progresso_callback)
             
-        btn_consultar.config(state=tk.DISABLED)
-        btn_criar_dir.pack_forget()
-        chk_auto.pack_forget()
-        btn_processar.pack_forget()
-        btn_enviar.pack_forget()
-        btn_cancelar_envio.pack_forget()
-        txt_resultado.delete(1.0, tk.END)
-        txt_resultado.insert(tk.END, "Consultando... aguarde.")
-        
-        def thread_consulta():
-            # removed nonlocal – ctx used instead
-            sucesso, resultado, dados_brutos, chaves, tabela = api.consultar_protocolo(protocolo)
-            
-            def atualizar_gui():
-                # removed nonlocal – ctx used instead
-                # Limpa logs
-                txt_resultado.delete(1.0, tk.END)
+            if self.auto_enviar:
+                self.progress_signal.emit(100, "Copiando arquivo para a rede...")
+                self.log_signal.emit("-> [Envio] Copiando arquivo para a rede ...", "info")
+                self.ctx.cancel_event.clear()
                 
-                # Extrai apenas as mensagens de status (tudo antes da tabela ASCII)
-                # Como tabulate usa '+---' e '|', podemos quebrar o texto na primeira ocorrência de '+'
-                if '+' in resultado:
-                    status_text = resultado.split('+')[0].strip() + '\n'
-                else:
-                    status_text = resultado
-                    
-                txt_resultado.insert(tk.END, status_text)
-                btn_consultar.config(state=tk.NORMAL)
-                
-                # Aplica realce na mensagem de sucesso
-                pos_sucesso = txt_resultado.search("✅ DADOS RECUPERADOS COM SUCESSO! ✅", "1.0", tk.END)
-                if pos_sucesso:
-                    txt_resultado.tag_add("sucesso", pos_sucesso, f"{pos_sucesso} lineend")
-                    
-                # Aplica realce na mensagem de erro
-                pos_err = txt_resultado.search("⚠️ PROTOCOLO NÃO ENCONTRADO ⚠️", "1.0", tk.END)
-                if pos_err:
-                    txt_resultado.tag_add("erro", pos_err, f"{pos_err} lineend")
-                
-                # Limpa a Treeview
-                tree_dados.delete(*tree_dados.get_children())
-                tree_dados["columns"] = chaves
-                
-                # Configura os cabeçalhos e colunas da Treeview
-                for col in chaves:
-                    tree_dados.heading(col, text=col)
-                    tree_dados.column(col, width=150, anchor=tk.W)
-                    
-                for linha in tabela:
-                    tree_dados.insert("", tk.END, values=linha)
-                
-                if sucesso:
-                    ctx.dados = dados_brutos
-                    ctx.protocolo = protocolo
-                    ctx.texto_resultado = resultado
-                    ctx.caminho_base = utils.obter_caminho_base(protocolo, dados_brutos, config.get('pasta_raiz'))
-                    chk_auto.pack(side=tk.LEFT, padx=5)
-                    atualizar_botoes_gui()
-                    if ctx.caminho_base and os.path.exists(ctx.caminho_base):
-                        aviso_msg = f"ℹ️ AVISO: O diretório para este protocolo já existe em:\n{ctx.caminho_base}\n\n"
-                        if pos_sucesso:
-                            pos_insercao = f"{pos_sucesso} lineend + 2 chars"
-                            txt_resultado.insert(pos_insercao, aviso_msg, "aviso")
-                        else:
-                            txt_resultado.insert(tk.END, "\n\n" + aviso_msg, "aviso")
-                else:
-                    ctx.dados = None
-                    ctx.protocolo = None
-                    ctx.texto_resultado = None
-                    atualizar_botoes_gui()
-                    btn_cancelar_envio.pack_forget()
-                    
-            txt_resultado.after(0, atualizar_gui)
-            
-        threading.Thread(target=thread_consulta, daemon=True).start()
-
-    def abrir_configuracoes():
-        janela_config = tk.Toplevel(janela)
-        janela_config.title("Configurações do GAD")
-        janela_config.geometry("500x320")
-        janela_config.grab_set() 
-        
-        ttk.Label(janela_config, text="Pasta Raiz Local:", font=("Segoe UI", 10, "bold")).pack(anchor=tk.W, padx=20, pady=(15, 5))
-        frame_raiz = ttk.Frame(janela_config)
-        frame_raiz.pack(fill=tk.X, padx=20)
-        
-        entry_raiz = ttk.Entry(frame_raiz)
-        entry_raiz.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        entry_raiz.insert(0, config.get('pasta_raiz', ''))
-        
-        def buscar_raiz():
-            d = filedialog.askdirectory()
-            if d:
-                entry_raiz.delete(0, tk.END)
-                entry_raiz.insert(0, d)
-        
-        ttk.Button(frame_raiz, text="Buscar", command=buscar_raiz).pack(side=tk.LEFT, padx=(5,0))
-        
-        ttk.Label(janela_config, text="Destino Storage (Rede):", font=("Segoe UI", 10, "bold")).pack(anchor=tk.W, padx=20, pady=(10, 5))
-        entry_storage = ttk.Entry(janela_config)
-        entry_storage.pack(fill=tk.X, padx=20)
-        entry_storage.insert(0, config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos'))
-
-        ttk.Label(janela_config, text="Destino de Backup:", font=("Segoe UI", 10, "bold")).pack(anchor=tk.W, padx=20, pady=(10, 5))
-        frame_backup = ttk.Frame(janela_config)
-        frame_backup.pack(fill=tk.X, padx=20)
-        
-        entry_backup = ttk.Entry(frame_backup)
-        entry_backup.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        entry_backup.insert(0, config.get('destino_backup', ''))
-        
-        def buscar_backup():
-            d = filedialog.askdirectory()
-            if d:
-                entry_backup.delete(0, tk.END)
-                entry_backup.insert(0, d)
-        
-        ttk.Button(frame_backup, text="Buscar", command=buscar_backup).pack(side=tk.LEFT, padx=(5,0))
-        
-        def salvar_configs():
-            config['pasta_raiz'] = entry_raiz.get().strip()
-            config['destino_storage'] = entry_storage.get().strip()
-            config['destino_backup'] = entry_backup.get().strip()
-            utils.salvar_config(config)
-
-            messagebox.showinfo("Sucesso", "Configurações salvas com sucesso!")
-            janela_config.destroy()
-            
-        ttk.Button(janela_config, text="Salvar Configurações", command=salvar_configs).pack(pady=20)
-            
-    def listar_diretorios():
-        pasta_raiz = config.get('pasta_raiz')
-        if not pasta_raiz or not os.path.isdir(pasta_raiz):
-            messagebox.showwarning("Aviso", "Pasta raiz não configurada ou inválida.\nPor favor, configure-a primeiro.")
-            return
-            
-        janela_lista = tk.Toplevel(janela)
-        janela_lista.title("Processos Locais")
-        janela_lista.geometry("750x480")
-        
-        frame_tree = tk.Frame(janela_lista)
-        frame_tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        colunas = ("Pasta", "Tamanho")
-        tree = ttk.Treeview(frame_tree, columns=colunas, show="headings", selectmode="extended")
-        tree.heading("Pasta", text="Nome da Pasta")
-        tree.heading("Tamanho", text="Tamanho Ocupado")
-        tree.column("Pasta", width=500)
-        tree.column("Tamanho", width=150, anchor=tk.E)
-        
-        scrollbar = ttk.Scrollbar(frame_tree, orient=tk.VERTICAL, command=tree.yview)
-        tree.configure(yscroll=scrollbar.set)
-        
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        janela.tree_list = tree
-
-        cancel_event_list = threading.Event()
-
-        def obter_contexto_pasta(nome_pasta):
-            caminho_pasta = os.path.join(pasta_raiz, nome_pasta)
-            protocolo = ""
-            if ".Prot_" in nome_pasta:
-                protocolo = nome_pasta.split(".Prot_")[1]
-            
-            caminho_json = os.path.join(caminho_pasta, 'Laudo', 'dados_protocolo.json')
-            if os.path.exists(caminho_json):
-                try:
-                    with open(caminho_json, 'r', encoding='utf-8') as f:
-                        dados = json.load(f)
-                    local_ctx = utils.ProtocoloContext()
-                    local_ctx.dados = dados
-                    local_ctx.protocolo = protocolo
-                    local_ctx.caminho_base = caminho_pasta
-                    utils.tentar_restaurar_processamento(local_ctx)
-                    return local_ctx
-                except Exception:
-                    return None
-            return None
-
-        def ao_selecionar_pasta(event):
-            selected_items = tree.selection()
-            if not selected_items:
-                return
-            item = selected_items[0]
-            valores = tree.item(item, "values")
-            if not valores:
-                return
-            nome_pasta = valores[0]
-            caminho_pasta = os.path.join(pasta_raiz, nome_pasta)
-            
-            protocolo = ""
-            if ".Prot_" in nome_pasta:
-                protocolo = nome_pasta.split(".Prot_")[1]
-            
-            caminho_json = os.path.join(caminho_pasta, 'Laudo', 'dados_protocolo.json')
-            if os.path.exists(caminho_json):
-                try:
-                    with open(caminho_json, 'r', encoding='utf-8') as f:
-                        dados = json.load(f)
-                    ctx.dados = dados
-                    ctx.protocolo = protocolo
-                    ctx.caminho_base = caminho_pasta
-                    ctx.caminho_zip = ""
-                    ctx.senha = ""
-                    ctx.hash_diretorio = ""
-                    ctx.ano = 0
-                    ctx.numero_laudo = ""
-                    utils.tentar_restaurar_processamento(ctx)
-                    caminho_txt = os.path.join(caminho_pasta, 'Laudo', 'Resumo_Laudo.txt')
-                    if os.path.exists(caminho_txt):
-                        with open(caminho_txt, 'r', encoding='utf-8') as f_txt:
-                            ctx.texto_resultado = f_txt.read()
-                    else:
-                        ctx.texto_resultado = ""
-                except Exception as e:
-                    print(f"Erro ao carregar dados do diretório selecionado: {e}")
-            atualizar_botoes_gui()
-
-        tree.bind("<<TreeviewSelect>>", ao_selecionar_pasta)
-
-        frame_acoes = ttk.Frame(janela_lista)
-        frame_acoes.pack(fill=tk.X, pady=5, padx=20)
-
-        janela.btn_recriar_dir_list = ttk.Button(frame_acoes, text="ReCriar diretórios", style="Process.TButton", command=lambda: recriar_diretorios_lote())
-        janela.btn_processar_list = ttk.Button(frame_acoes, text="1. Processar Anexos (ZIP/Hash)", style="Process.TButton", command=lambda: processar_anexos_lote())
-        janela.btn_reprocessar_list = ttk.Button(frame_acoes, text="ReProcessar", style="Process.TButton", command=lambda: processar_anexos_lote())
-        janela.btn_abrir_dir_list = ttk.Button(frame_acoes, text="Abrir Pasta", style="Action.TButton", command=lambda: os.startfile(ctx.caminho_base) if ctx.caminho_base else None)
-        janela.btn_enviar_list = ttk.Button(frame_acoes, text="2. Enviar p/ Storage", style="Upload.TButton", command=lambda: enviar_storage_lote())
-        janela.btn_limpar_extracao_list = ttk.Button(frame_acoes, text="Limpar Extração", style="Danger.TButton", command=lambda: limpar_extracao_lote())
-        janela.btn_backup_list = ttk.Button(frame_acoes, text="Backup & Limpar", style="Upload.TButton", command=lambda: backup_limpar_lote())
-        janela.chk_auto_list = ttk.Checkbutton(frame_acoes, text="Enviar automaticamente ao Storage", variable=auto_enviar)
-
-        progress_bar_list = ttk.Progressbar(frame_acoes, mode='indeterminate')
-        btn_cancelar_list = ttk.Button(frame_acoes, text="Cancelar", style="Danger.TButton", command=lambda: cancelar_list_gui())
-
-        def ao_fechar_lista(event):
-            if event.widget == janela_lista:
-                for attr in ['btn_recriar_dir_list', 'btn_processar_list', 'btn_reprocessar_list', 'btn_abrir_dir_list', 'btn_enviar_list', 'chk_auto_list', 'tree_list', 'btn_limpar_extracao_list', 'btn_backup_list']:
-                    if hasattr(janela, attr):
-                        try:
-                            delattr(janela, attr)
-                        except Exception:
-                            pass
-        janela_lista.bind("<Destroy>", ao_fechar_lista)
-        
-        lbl_status = tk.Label(janela_lista, text="Calculando tamanhos... por favor aguarde.")
-        lbl_status.pack(pady=5)
-
-        def bloquear_controles_list(bloquear):
-            state = tk.DISABLED if bloquear else tk.NORMAL
-            janela.btn_recriar_dir_list.config(state=state)
-            janela.btn_processar_list.config(state=state)
-            janela.btn_reprocessar_list.config(state=state)
-            janela.btn_enviar_list.config(state=state)
-            janela.chk_auto_list.config(state=state)
-            janela.btn_limpar_extracao_list.config(state=state)
-            janela.btn_backup_list.config(state=state)
-            tree.config(selectmode="none" if bloquear else "extended")
-
-        def finalizar_lote():
-            janela_lista.after(0, lambda: progress_bar_list.stop())
-            janela_lista.after(0, lambda: progress_bar_list.pack_forget())
-            janela_lista.after(0, lambda: btn_cancelar_list.pack_forget())
-            janela_lista.after(0, lambda: bloquear_controles_list(False))
-
-        def perguntar_sobrescrever_lote(caminho):
-            import queue
-            q = queue.Queue()
-            def ask():
-                res = messagebox.askyesno(
-                    "Confirmar Sobrescrita", 
-                    f"O arquivo já existe no destino:\n{caminho}\n\nDeseja sobrescrevê-lo?",
-                    parent=janela_lista
+                destino = services.enviar_ao_storage(
+                    self.ctx, 
+                    confirmar_sobrescrever=self.parent_window.perguntar_sobrescrever, 
+                    cancel_event=self.ctx.cancel_event
                 )
-                q.put(res)
-            janela_lista.after(0, ask)
-            return q.get()
+                
+                if not (self.ctx.cancel_event and self.ctx.cancel_event.is_set()):
+                    self.log_signal.emit(f"\n[SUCESSO] Processamento e envio concluídos!\nSalvo em rede: {destino}\n", "success")
+                    self.finished_signal.emit(True, destino)
+                else:
+                    self.log_signal.emit("\n[AVISO] Envio cancelado pelo usuário.\n", "warning")
+                    self.finished_signal.emit(False, "Cancelado")
+            else:
+                self.log_signal.emit("\n[SUCESSO] Processamento de anexos concluído localmente!\n", "success")
+                self.finished_signal.emit(True, "Local")
+        except Exception as e:
+            self.log_signal.emit(f"\n[ERRO] Falha no processamento: {e}\n", "error")
+            self.finished_signal.emit(False, str(e))
 
-        def cancelar_list_gui():
-            if messagebox.askyesno("Confirmar Cancelamento", "Deseja realmente cancelar a execução em lote?", parent=janela_lista):
-                cancel_event_list.set()
-                finalizar_lote()
-                lbl_status.config(text="Execução em lote cancelada pelo usuário.")
 
-        def limpar_extracao_lote():
-            selected = tree.selection()
-            if not selected:
-                return
-            confirmacao = messagebox.askyesno(
-                "Confirmar Limpeza",
-                f"Deseja realmente limpar a pasta 'Extração' de todos os {len(selected)} processos selecionados?\nEsta ação apagará permanentemente todos os arquivos contidos nessa pasta.",
-                parent=janela_lista
+class UploadWorker(QThread):
+    log_signal = Signal(str, str)
+    finished_signal = Signal(bool, str)
+
+    def __init__(self, ctx, parent_window):
+        super().__init__()
+        self.ctx = ctx
+        self.parent_window = parent_window
+
+    def run(self):
+        self.ctx.cancel_event.clear()
+        try:
+            destino = services.enviar_ao_storage(
+                self.ctx, 
+                confirmar_sobrescrever=self.parent_window.perguntar_sobrescrever, 
+                cancel_event=self.ctx.cancel_event
             )
-            if not confirmacao:
-                return
-                
-            bloquear_controles_list(True)
-            cancel_event_list.clear()
-            progress_bar_list.pack(side=tk.LEFT, padx=5)
-            progress_bar_list.start()
-            btn_cancelar_list.pack(side=tk.LEFT, padx=5)
+            if not (self.ctx.cancel_event and self.ctx.cancel_event.is_set()):
+                self.finished_signal.emit(True, destino)
+            else:
+                self.finished_signal.emit(False, "Cancelado")
+        except Exception as e:
+            self.finished_signal.emit(False, str(e))
 
-            def thread_run():
-                sucessos = 0
-                erros = 0
-                for i, item in enumerate(selected):
-                    if cancel_event_list.is_set():
-                        break
-                    valores = tree.item(item, "values")
-                    nome_pasta = valores[0]
-                    janela_lista.after(0, lambda idx=i+1, tot=len(selected), name=nome_pasta: lbl_status.config(text=f"Limpando Extração {idx} de {tot}: {name}..."))
-                    
-                    local_ctx = obter_contexto_pasta(nome_pasta)
-                    if not local_ctx or not local_ctx.caminho_base:
-                        erros += 1
-                        continue
-                        
-                    caminho_extracao = os.path.join(local_ctx.caminho_base, 'Extração')
-                    try:
-                        if os.path.exists(caminho_extracao):
-                            shutil.rmtree(caminho_extracao)
-                        os.makedirs(caminho_extracao, exist_ok=True)
-                        sucessos += 1
-                    except Exception as e:
-                        print(f"Erro ao limpar Extração em {nome_pasta}: {e}")
-                        erros += 1
-                        
-                janela_lista.after(0, lambda: lbl_status.config(text=f"Limpeza concluída. Sucessos: {sucessos}, Erros: {erros}."))
-                finalizar_lote()
-                janela_lista.after(0, atualizar_tamanhos_tabela)
-                
-            threading.Thread(target=thread_run, daemon=True).start()
 
-        def backup_limpar_lote():
-            selected = tree.selection()
-            if not selected:
-                return
-                
-            destino_backup = config.get('destino_backup')
-            if not destino_backup or not os.path.isdir(destino_backup):
-                messagebox.showerror("Erro", "Destino de backup não configurado ou inválido nas configurações.", parent=janela_lista)
-                return
+class SizeCalculatorWorker(QThread):
+    item_calculated = Signal(str, str) # name, formatted size
+    finished_signal = Signal()
 
-            confirmacao = messagebox.askyesno(
-                "Confirmar Backup & Limpeza",
-                f"Deseja realmente compactar e fazer backup de todos os {len(selected)} processos selecionados?\nApós a conclusão bem-sucedida, as pastas locais originais e os arquivos ZIP locais serão APAGADOS permanentemente.",
-                parent=janela_lista
-            )
-            if not confirmacao:
-                return
-                
-            bloquear_controles_list(True)
-            cancel_event_list.clear()
-            progress_bar_list.pack(side=tk.LEFT, padx=5)
-            progress_bar_list.config(mode='determinate', maximum=100, value=0)
-            btn_cancelar_list.pack(side=tk.LEFT, padx=5)
+    def __init__(self, pasta_raiz):
+        super().__init__()
+        self.pasta_raiz = pasta_raiz
 
-            def thread_run():
-                import queue
-                sucessos = 0
-                pulados = 0
-                erros = 0
-                for i, item in enumerate(selected):
-                    if cancel_event_list.is_set():
-                        break
-                    valores = tree.item(item, "values")
-                    nome_pasta = valores[0]
-                    
-                    local_ctx = obter_contexto_pasta(nome_pasta)
-                    if not local_ctx or not local_ctx.caminho_base:
-                        erros += 1
-                        continue
-                        
-                    caminho_zip_local = os.path.join(pasta_raiz, f"{nome_pasta}.zip")
-                    caminho_backup_final = os.path.join(destino_backup, f"{nome_pasta}.zip")
-                    
-                    if os.path.exists(caminho_backup_final):
-                        q = queue.Queue()
-                        def perguntar(q=q, name=nome_pasta):
-                            res = messagebox.askyesno(
-                                "Sobrescrever Backup",
-                                f"O arquivo de backup '{name}.zip' já existe na pasta de destino.\nDeseja sobrescrevê-lo?",
-                                parent=janela_lista
-                            )
-                            q.put(res)
-                        janela_lista.after(0, perguntar)
-                        sobrescrever = q.get()
-                        if not sobrescrever:
-                            pulados += 1
-                            continue
-                    
-                    try:
-                        # Etapa 1: Compactando pasta
-                        janela_lista.after(0, lambda idx=i+1, tot=len(selected), name=nome_pasta: (
-                            lbl_status.config(text=f"[{idx}/{tot}] {name} - Etapa 1/5: Compactando pasta..."),
-                            progress_bar_list.config(value=20)
-                        ))
-                        shutil.make_archive(
-                            base_name=os.path.join(pasta_raiz, nome_pasta),
-                            format='zip',
-                            root_dir=pasta_raiz,
-                            base_dir=nome_pasta
-                        )
-                        
-                        # Etapa 2: Copiando para destino de backup
-                        janela_lista.after(0, lambda idx=i+1, tot=len(selected), name=nome_pasta: (
-                            lbl_status.config(text=f"[{idx}/{tot}] {name} - Etapa 2/5: Copiando para destino de backup..."),
-                            progress_bar_list.config(value=40)
-                        ))
-                        shutil.copy2(caminho_zip_local, caminho_backup_final)
-                        
-                        # Etapa 3: Verificando integridade
-                        janela_lista.after(0, lambda idx=i+1, tot=len(selected), name=nome_pasta: (
-                            lbl_status.config(text=f"[{idx}/{tot}] {name} - Etapa 3/5: Verificando integridade..."),
-                            progress_bar_list.config(value=60)
-                        ))
-                        
-                        if os.path.exists(caminho_backup_final) and os.path.getsize(caminho_backup_final) == os.path.getsize(caminho_zip_local):
-                            # Etapa 4: Removendo pasta local original
-                            janela_lista.after(0, lambda idx=i+1, tot=len(selected), name=nome_pasta: (
-                                lbl_status.config(text=f"[{idx}/{tot}] {name} - Etapa 4/5: Removendo pasta local original..."),
-                                progress_bar_list.config(value=80)
-                            ))
-                            shutil.rmtree(local_ctx.caminho_base)
-                            
-                            # Etapa 5: Removendo compactado temporário
-                            janela_lista.after(0, lambda idx=i+1, tot=len(selected), name=nome_pasta: (
-                                lbl_status.config(text=f"[{idx}/{tot}] {name} - Etapa 5/5: Removendo compactado temporário..."),
-                                progress_bar_list.config(value=100)
-                            ))
-                            if os.path.exists(caminho_zip_local):
-                                os.remove(caminho_zip_local)
-                            sucessos += 1
-                        else:
-                            raise Exception("Falha ao confirmar o tamanho do arquivo de backup copiado.")
-                    except Exception as e:
-                        print(f"Erro no backup de {nome_pasta}: {e}")
-                        try:
-                            if os.path.exists(caminho_zip_local):
-                                os.remove(caminho_zip_local)
-                        except Exception:
-                            pass
-                        erros += 1
-                        
-                janela_lista.after(0, lambda: lbl_status.config(text=f"Backup concluído. Sucessos: {sucessos}, Pulados: {pulados}, Erros: {erros}."))
-                janela_lista.after(0, lambda: messagebox.showinfo("Backup Concluído", f"O processo de backup foi finalizado com sucesso!\n\nSucessos: {sucessos}\nPulados (não sobrescritos): {pulados}\nErros: {erros}", parent=janela_lista))
-                finalizar_lote()
-                janela_lista.after(0, atualizar_tamanhos_tabela)
-                
-            threading.Thread(target=thread_run, daemon=True).start()
-
-        def atualizar_tamanhos_tabela():
-            tree.delete(*tree.get_children())
-            lbl_status.config(text="Recalculando tamanhos... por favor aguarde.")
-            threading.Thread(target=popular_tree, daemon=True).start()
-
-        def recriar_diretorios_lote():
-            selected = tree.selection()
-            if not selected:
-                return
-            confirmacao = messagebox.askyesno(
-                "Confirmar Recriação em Lote",
-                f"Deseja realmente RECRIAR os diretórios dos {len(selected)} processos selecionados?\nTodos os arquivos existentes nestas pastas serão apagados permanentemente!",
-                parent=janela_lista
-            )
-            if not confirmacao:
-                return
-                
-            bloquear_controles_list(True)
-            cancel_event_list.clear()
-            progress_bar_list.pack(side=tk.LEFT, padx=5)
-            progress_bar_list.config(mode='indeterminate')
-            progress_bar_list.start()
-            btn_cancelar_list.pack(side=tk.LEFT, padx=5)
-
-            def thread_run():
-                sucessos = 0
-                erros = 0
-                for i, item in enumerate(selected):
-                    if cancel_event_list.is_set():
-                        break
-                    valores = tree.item(item, "values")
-                    nome_pasta = valores[0]
-                    janela_lista.after(0, lambda idx=i+1, tot=len(selected), name=nome_pasta: lbl_status.config(text=f"Recriando {idx} de {tot}: {name}..."))
-                    
-                    local_ctx = obter_contexto_pasta(nome_pasta)
-                    if not local_ctx:
-                        erros += 1
-                        continue
-                        
-                    resumo_txt = ""
-                    caminho_txt = os.path.join(local_ctx.caminho_base, 'Laudo', 'Resumo_Laudo.txt')
-                    if os.path.exists(caminho_txt):
-                        try:
-                            with open(caminho_txt, 'r', encoding='utf-8') as f_txt:
-                                resumo_txt = f_txt.read()
-                        except Exception:
-                            pass
-
-                    try:
-                        shutil.rmtree(local_ctx.caminho_base)
-                        pastas_para_criar = ['Extração', 'Fotos', 'Laudo', 'Relatorios', 'Relatorios/Anexo Digital']
-                        os.makedirs(local_ctx.caminho_base, exist_ok=True)
-                        for p in pastas_para_criar:
-                            os.makedirs(os.path.join(local_ctx.caminho_base, p), exist_ok=True)
-                        
-                        caminho_json = os.path.join(local_ctx.caminho_base, 'Laudo', 'dados_protocolo.json')
-                        with open(caminho_json, 'w', encoding='utf-8') as f:
-                            json.dump(local_ctx.dados, f, indent=4, ensure_ascii=False)
-                        
-                        if resumo_txt:
-                            utils.salvar_resumo_txt(caminho_txt, local_ctx.protocolo, resumo_txt)
-                        sucessos += 1
-                    except Exception as e:
-                        print(f"Erro ao recriar {nome_pasta}: {e}")
-                        erros += 1
-                        
-                janela_lista.after(0, lambda: lbl_status.config(text=f"Recriação concluída. Sucessos: {sucessos}, Erros: {erros}."))
-                finalizar_lote()
-                janela_lista.after(0, atualizar_tamanhos_tabela)
-                
-            threading.Thread(target=thread_run, daemon=True).start()
-
-        def processar_anexos_lote():
-            selected = tree.selection()
-            if not selected:
-                return
-                
-            bloquear_controles_list(True)
-            cancel_event_list.clear()
-            progress_bar_list.pack(side=tk.LEFT, padx=5)
-            progress_bar_list.config(mode='determinate', maximum=100, value=0)
-            btn_cancelar_list.pack(side=tk.LEFT, padx=5)
-
-            def thread_run():
-                sucessos = 0
-                erros = 0
-                for i, item in enumerate(selected):
-                    if cancel_event_list.is_set():
-                        break
-                    valores = tree.item(item, "values")
-                    nome_pasta = valores[0]
-                    
-                    def local_callback_progresso(pct, desc, idx=i, tot=len(selected), name=nome_pasta):
-                        progresso_total = int((idx * 100 + pct) / tot)
-                        janela_lista.after(0, lambda p=progresso_total, d=desc: (
-                            lbl_status.config(text=f"[{idx+1}/{tot}] {name} - {d}"),
-                            progress_bar_list.config(value=p)
-                        ))
-                    
-                    local_ctx = obter_contexto_pasta(nome_pasta)
-                    if not local_ctx:
-                        erros += 1
-                        continue
-                    
-                    laudo_criado = False
-                    num_laudo = None
-                    ano_laudo = None
-                    if isinstance(local_ctx.dados, dict) and 'laudo' in local_ctx.dados and local_ctx.dados['laudo']:
-                        numero_completo = local_ctx.dados['laudo'].get('numeroCompleto')
-                        if numero_completo:
-                            laudo_criado = True
-                            if '.' in numero_completo:
-                                partes = numero_completo.split('.')
-                                try:
-                                    ano_laudo = int(partes[0])
-                                except ValueError:
-                                    pass
-                                num_laudo = partes[1]
-                            else:
-                                num_laudo = str(numero_completo)
-                                
-                    if not laudo_criado or not num_laudo:
-                        erros += 1
-                        continue
-                        
-                    local_ctx.numero_laudo = num_laudo
-                    local_ctx.ano = ano_laudo if ano_laudo else datetime.now().year
-                    local_ctx.auto_enviar = auto_enviar.get()
-                    local_ctx.cancel_event = cancel_event_list
-                    
-                    try:
-                        services.processar_anexos(local_ctx, callback_progresso=local_callback_progresso)
-                        sucessos += 1
-                        if local_ctx.auto_enviar:
-                            janela_lista.after(0, lambda idx=i+1, tot=len(selected), name=nome_pasta: lbl_status.config(text=f"[{idx}/{tot}] {name} - Enviando ao Storage..."))
-                            services.enviar_ao_storage(local_ctx, confirmar_sobrescrever=perguntar_sobrescrever_lote, cancel_event=cancel_event_list)
-                    except Exception as e:
-                        print(f"Erro ao processar/enviar {nome_pasta}: {e}")
-                        erros += 1
-                        
-                janela_lista.after(0, lambda: lbl_status.config(text=f"Processamento concluído. Sucessos: {sucessos}, Erros: {erros}."))
-                finalizar_lote()
-                janela_lista.after(0, atualizar_tamanhos_tabela)
-                janela_lista.after(0, atualizar_botoes_gui)
-                
-            threading.Thread(target=thread_run, daemon=True).start()
-
-        def enviar_storage_lote():
-            selected = tree.selection()
-            if not selected:
-                return
-                
-            bloquear_controles_list(True)
-            cancel_event_list.clear()
-            progress_bar_list.pack(side=tk.LEFT, padx=5)
-            progress_bar_list.config(mode='indeterminate')
-            progress_bar_list.start()
-            btn_cancelar_list.pack(side=tk.LEFT, padx=5)
-
-            def thread_run():
-                sucessos = 0
-                erros = 0
-                for i, item in enumerate(selected):
-                    if cancel_event_list.is_set():
-                        break
-                    valores = tree.item(item, "values")
-                    nome_pasta = valores[0]
-                    janela_lista.after(0, lambda idx=i+1, tot=len(selected), name=nome_pasta: lbl_status.config(text=f"Enviando {idx} de {tot}: {name}..."))
-                    
-                    local_ctx = obter_contexto_pasta(nome_pasta)
-                    if not local_ctx:
-                        erros += 1
-                        continue
-                    
-                    if not local_ctx.caminho_zip or not os.path.exists(local_ctx.caminho_zip):
-                        utils.tentar_restaurar_processamento(local_ctx)
-                        if not local_ctx.caminho_zip or not os.path.exists(local_ctx.caminho_zip):
-                            erros += 1
-                            continue
-                            
-                    laudo_criado = False
-                    num_laudo = None
-                    ano_laudo = None
-                    if isinstance(local_ctx.dados, dict) and 'laudo' in local_ctx.dados and local_ctx.dados['laudo']:
-                        numero_completo = local_ctx.dados['laudo'].get('numeroCompleto')
-                        if numero_completo:
-                            laudo_criado = True
-                            if '.' in numero_completo:
-                                partes = numero_completo.split('.')
-                                try:
-                                    ano_laudo = int(partes[0])
-                                except ValueError:
-                                    pass
-                                num_laudo = partes[1]
-                            else:
-                                num_laudo = str(numero_completo)
-                    if not num_laudo:
-                        erros += 1
-                        continue
-                    local_ctx.numero_laudo = num_laudo
-                    local_ctx.ano = ano_laudo if ano_laudo else datetime.now().year
-                    local_ctx.cancel_event = cancel_event_list
-                    
-                    try:
-                        services.enviar_ao_storage(local_ctx, confirmar_sobrescrever=perguntar_sobrescrever_lote, cancel_event=cancel_event_list)
-                        sucessos += 1
-                    except Exception as e:
-                        print(f"Erro ao enviar {nome_pasta}: {e}")
-                        erros += 1
-                        
-                janela_lista.after(0, lambda: lbl_status.config(text=f"Envio concluído. Sucessos: {sucessos}, Erros: {erros}."))
-                finalizar_lote()
-                janela_lista.after(0, atualizar_botoes_gui)
-                
-            threading.Thread(target=thread_run, daemon=True).start()
+    def run(self):
+        if not self.pasta_raiz or not os.path.isdir(self.pasta_raiz):
+            self.finished_signal.emit()
+            return
         
-        def popular_tree():
-            for nome_pasta in os.listdir(pasta_raiz):
-                caminho_completo = os.path.join(pasta_raiz, nome_pasta)
+        try:
+            for nome_pasta in os.listdir(self.pasta_raiz):
+                caminho_completo = os.path.join(self.pasta_raiz, nome_pasta)
                 if os.path.isdir(caminho_completo):
                     tamanho_bytes = 0
                     for dirpath, _, filenames in os.walk(caminho_completo):
@@ -712,210 +326,1072 @@ def iniciar_interface():
                                     tamanho_bytes += os.path.getsize(fp)
                                 except OSError:
                                     pass
-                    
                     tamanho_formatado = utils.formatar_tamanho(tamanho_bytes)
-                    janela_lista.after(0, lambda p=nome_pasta, t=tamanho_formatado: tree.insert("", tk.END, values=(p, t)))
-            
-            janela_lista.after(0, lambda: lbl_status.config(text="Cálculo concluído."))
-        
-        threading.Thread(target=popular_tree, daemon=True).start()
-
-    def criar_diretorios():
-        if not ctx.dados or not ctx.protocolo:
-            messagebox.showerror("Erro", "Não há dados de protocolo para criar os diretórios.")
-            return
-            
-        pasta_raiz = config.get('pasta_raiz')
-        if not pasta_raiz or not os.path.isdir(pasta_raiz):
-            messagebox.showinfo("Aviso", "Pasta raiz não configurada ou inválida.\nPor favor, selecione no explorador de arquivos.")
-            pasta_selecionada = filedialog.askdirectory(title="Selecione a Pasta Raiz")
-            if not pasta_selecionada:
-                return
-            config['pasta_raiz'] = pasta_selecionada
-            utils.salvar_config(config)
-            pasta_raiz = pasta_selecionada
-
-
-        caminho_base = utils.obter_caminho_base(ctx.protocolo, ctx.dados, pasta_raiz)
-        if not caminho_base:
-            return
-        
-        if os.path.exists(caminho_base):
-            messagebox.showinfo("Aviso", "O diretório para este protocolo já existe.")
-            btn_criar_dir.pack_forget()
-            return
-            
-        pastas_para_criar = ['Extração', 'Fotos', 'Laudo', 'Relatorios', 'Relatorios/Anexo Digital']
-        
-        try:
-            os.makedirs(caminho_base, exist_ok=True)
-            for pasta in pastas_para_criar:
-                os.makedirs(os.path.join(caminho_base, pasta), exist_ok=True)
-            caminho_json = os.path.join(caminho_base, 'Laudo', 'dados_protocolo.json')
-            with open(caminho_json, 'w', encoding='utf-8') as f:
-                json.dump(ctx.dados, f, indent=4, ensure_ascii=False)
-            if ctx.texto_resultado:
-                caminho_txt = os.path.join(caminho_base, 'Laudo', 'Resumo_Laudo.txt')
-                utils.salvar_resumo_txt(caminho_txt, ctx.protocolo, ctx.texto_resultado)
-            messagebox.showinfo("Sucesso", f"Diretórios criados com sucesso em:\n{caminho_base}")
-            ctx.caminho_zip = ""
-            ctx.senha = ""
-            ctx.hash_diretorio = ""
-            atualizar_botoes_gui()
-            os.startfile(caminho_base)
-            
+                    self.item_calculated.emit(nome_pasta, tamanho_formatado)
         except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao criar diretórios: {e}")
+            print(f"Erro ao calcular tamanhos: {e}")
+        self.finished_signal.emit()
 
-    def recriar_diretorios():
-        if not ctx.dados or not ctx.protocolo:
-            messagebox.showerror("Erro", "Não há dados de protocolo para recriar os diretórios.")
-            return
-            
-        pasta_raiz = config.get('pasta_raiz')
-        if not pasta_raiz or not os.path.isdir(pasta_raiz):
-            messagebox.showinfo("Aviso", "Pasta raiz não configurada ou inválida.\nPor favor, selecione no explorador de arquivos.")
-            pasta_selecionada = filedialog.askdirectory(title="Selecione a Pasta Raiz")
-            if not pasta_selecionada:
-                return
-            config['pasta_raiz'] = pasta_selecionada
-            utils.salvar_config(config)
-            pasta_raiz = pasta_selecionada
 
-        caminho_base = utils.obter_caminho_base(ctx.protocolo, ctx.dados, pasta_raiz)
-        if not caminho_base:
-            return
-            
-        if os.path.exists(caminho_base):
-            confirmacao = messagebox.askyesno(
-                "Confirmar Recriação", 
-                f"O diretório já existe em:\n{caminho_base}\n\nTem certeza de que deseja RECRIAR? Todos os arquivos existentes nesta pasta serão apagados permanentemente!"
-            )
-            if not confirmacao:
-                return
-            
+class BatchWorker(QThread):
+    progress_signal = Signal(int, str) # pct, description
+    finished_signal = Signal(int, int) # sucessos, erros
+    
+    def __init__(self, task_type, selected_folders, pasta_raiz, destino_storage, destino_backup, auto_enviar, parent_dlg):
+        super().__init__()
+        self.task_type = task_type
+        self.selected_folders = selected_folders
+        self.pasta_raiz = pasta_raiz
+        self.destino_storage = destino_storage
+        self.destino_backup = destino_backup
+        self.auto_enviar = auto_enviar
+        self.parent_dlg = parent_dlg
+        self.cancel_event = threading.Event()
+
+    def obter_contexto_pasta(self, nome_pasta):
+        caminho_pasta = os.path.join(self.pasta_raiz, nome_pasta)
+        protocolo = ""
+        if ".Prot_" in nome_pasta:
+            protocolo = nome_pasta.split(".Prot_")[1]
+        
+        caminho_json = os.path.join(caminho_pasta, 'Laudo', 'dados_protocolo.json')
+        if os.path.exists(caminho_json):
             try:
-                shutil.rmtree(caminho_base)
-            except Exception as e:
-                messagebox.showerror("Erro", f"Falha ao apagar o diretório existente: {e}")
-                return
+                with open(caminho_json, 'r', encoding='utf-8') as f:
+                    dados = json.load(f)
+                local_ctx = utils.ProtocoloContext()
+                local_ctx.dados = dados
+                local_ctx.protocolo = protocolo
+                local_ctx.caminho_base = caminho_pasta
+                utils.tentar_restaurar_processamento(local_ctx)
+                return local_ctx
+            except Exception:
+                return None
+        return None
+
+    def run(self):
+        sucessos = 0
+        erros = 0
+        pulados = 0
+        total = len(self.selected_folders)
+
+        if total == 0:
+            self.finished_signal.emit(0, 0)
+            return
+
+        for i, nome_pasta in enumerate(self.selected_folders):
+            if self.cancel_event.is_set():
+                break
+
+            pct_base = int((i / total) * 100)
+            
+            # --- TAREFA: LIMPAR EXTRAÇÃO ---
+            if self.task_type == 'clear':
+                self.progress_signal.emit(pct_base, f"[{i+1}/{total}] {nome_pasta} - Limpando extração...")
+                local_ctx = self.obter_contexto_pasta(nome_pasta)
+                if not local_ctx or not local_ctx.caminho_base:
+                    erros += 1
+                    continue
+                caminho_extracao = os.path.join(local_ctx.caminho_base, 'Extração')
+                try:
+                    if os.path.exists(caminho_extracao):
+                        shutil.rmtree(caminho_extracao)
+                    os.makedirs(caminho_extracao, exist_ok=True)
+                    sucessos += 1
+                except Exception:
+                    erros += 1
+
+            # --- TAREFA: RECOMPILAR / RECOMPACTAR E BACKUP ---
+            elif self.task_type == 'backup':
+                local_ctx = self.obter_contexto_pasta(nome_pasta)
+                if not local_ctx or not local_ctx.caminho_base:
+                    erros += 1
+                    continue
+                caminho_zip_local = os.path.join(self.pasta_raiz, f"{nome_pasta}.zip")
+                caminho_backup_final = os.path.join(self.destino_backup, f"{nome_pasta}.zip")
                 
-        pastas_para_criar = ['Extração', 'Fotos', 'Laudo', 'Relatorios', 'Relatorios/Anexo Digital']
+                if os.path.exists(caminho_backup_final):
+                    # Solicita resposta da thread principal
+                    sobrescrever = self.parent_dlg.perguntar_sobrescrever_backup_lote(nome_pasta)
+                    if not sobrescrever:
+                        pulados += 1
+                        continue
+                
+                try:
+                    self.progress_signal.emit(int((i * 100 + 20) / total), f"[{i+1}/{total}] {nome_pasta} - Compactando pasta...")
+                    shutil.make_archive(
+                        base_name=os.path.join(self.pasta_raiz, nome_pasta),
+                        format='zip',
+                        root_dir=self.pasta_raiz,
+                        base_dir=nome_pasta
+                    )
+                    
+                    self.progress_signal.emit(int((i * 100 + 40) / total), f"[{i+1}/{total}] {nome_pasta} - Copiando p/ Backup...")
+                    shutil.copy2(caminho_zip_local, caminho_backup_final)
+                    
+                    self.progress_signal.emit(int((i * 100 + 60) / total), f"[{i+1}/{total}] {nome_pasta} - Verificando integridade...")
+                    if os.path.exists(caminho_backup_final) and os.path.getsize(caminho_backup_final) == os.path.getsize(caminho_zip_local):
+                        self.progress_signal.emit(int((i * 100 + 80) / total), f"[{i+1}/{total}] {nome_pasta} - Removendo originais...")
+                        shutil.rmtree(local_ctx.caminho_base)
+                        if os.path.exists(caminho_zip_local):
+                            os.remove(caminho_zip_local)
+                        sucessos += 1
+                    else:
+                        raise Exception("Erro de validação no backup")
+                except Exception:
+                    try:
+                        if os.path.exists(caminho_zip_local):
+                            os.remove(caminho_zip_local)
+                    except Exception:
+                        pass
+                    erros += 1
+
+            # --- TAREFA: RE-CRIAR DIRETÓRIOS ---
+            elif self.task_type == 'recreate':
+                self.progress_signal.emit(pct_base, f"[{i+1}/{total}] {nome_pasta} - Recriando diretórios...")
+                local_ctx = self.obter_contexto_pasta(nome_pasta)
+                if not local_ctx:
+                    erros += 1
+                    continue
+                resumo_txt = ""
+                caminho_txt = os.path.join(local_ctx.caminho_base, 'Laudo', 'Resumo_Laudo.txt')
+                if os.path.exists(caminho_txt):
+                    try:
+                        with open(caminho_txt, 'r', encoding='utf-8') as f_txt:
+                            resumo_txt = f_txt.read()
+                    except Exception:
+                        pass
+                try:
+                    shutil.rmtree(local_ctx.caminho_base)
+                    pastas_para_criar = ['Extração', 'Fotos', 'Laudo', 'Relatorios', 'Relatorios/Anexo Digital']
+                    os.makedirs(local_ctx.caminho_base, exist_ok=True)
+                    for p in pastas_para_criar:
+                        os.makedirs(os.path.join(local_ctx.caminho_base, p), exist_ok=True)
+                    caminho_json = os.path.join(local_ctx.caminho_base, 'Laudo', 'dados_protocolo.json')
+                    with open(caminho_json, 'w', encoding='utf-8') as f:
+                        json.dump(local_ctx.dados, f, indent=4, ensure_ascii=False)
+                    if resumo_txt:
+                        utils.salvar_resumo_txt(caminho_txt, local_ctx.protocolo, resumo_txt)
+                    sucessos += 1
+                except Exception:
+                    erros += 1
+
+            # --- TAREFA: PROCESSAR ANEXOS ---
+            elif self.task_type == 'process':
+                local_ctx = self.obter_contexto_pasta(nome_pasta)
+                if not local_ctx:
+                    erros += 1
+                    continue
+
+                laudo_criado = False
+                num_laudo = None
+                ano_laudo = None
+                if isinstance(local_ctx.dados, dict) and 'laudo' in local_ctx.dados and local_ctx.dados['laudo']:
+                    numero_completo = local_ctx.dados['laudo'].get('numeroCompleto')
+                    if numero_completo:
+                        laudo_criado = True
+                        if '.' in numero_completo:
+                            partes = numero_completo.split('.')
+                            try:
+                                ano_laudo = int(partes[0])
+                            except ValueError:
+                                pass
+                            num_laudo = partes[1]
+                        else:
+                            num_laudo = str(numero_completo)
+                
+                if not laudo_criado or not num_laudo:
+                    erros += 1
+                    continue
+
+                local_ctx.numero_laudo = num_laudo
+                local_ctx.ano = ano_laudo if ano_laudo else datetime.now().year
+                local_ctx.auto_enviar = self.auto_enviar
+                local_ctx.cancel_event = self.cancel_event
+
+                def local_cb(pct, desc):
+                    prog_pct = int((i * 100 + pct) / total)
+                    self.progress_signal.emit(prog_pct, f"[{i+1}/{total}] {nome_pasta} - {desc}")
+
+                try:
+                    services.processar_anexos(local_ctx, callback_progresso=local_cb)
+                    sucessos += 1
+                    if self.auto_enviar:
+                        self.progress_signal.emit(int(((i + 0.5) * 100) / total), f"[{i+1}/{total}] {nome_pasta} - Enviando Storage...")
+                        services.enviar_ao_storage(
+                            local_ctx, 
+                            confirmar_sobrescrever=self.parent_dlg.perguntar_sobrescrever_storage_lote, 
+                            cancel_event=self.cancel_event
+                        )
+                except Exception:
+                    erros += 1
+
+            # --- TAREFA: ENVIAR PARA STORAGE ---
+            elif self.task_type == 'upload':
+                self.progress_signal.emit(pct_base, f"[{i+1}/{total}] {nome_pasta} - Enviando Storage...")
+                local_ctx = self.obter_contexto_pasta(nome_pasta)
+                if not local_ctx:
+                    erros += 1
+                    continue
+                if not local_ctx.caminho_zip or not os.path.exists(local_ctx.caminho_zip):
+                    utils.tentar_restaurar_processamento(local_ctx)
+                    if not local_ctx.caminho_zip or not os.path.exists(local_ctx.caminho_zip):
+                        erros += 1
+                        continue
+
+                laudo_criado = False
+                num_laudo = None
+                ano_laudo = None
+                if isinstance(local_ctx.dados, dict) and 'laudo' in local_ctx.dados and local_ctx.dados['laudo']:
+                    numero_completo = local_ctx.dados['laudo'].get('numeroCompleto')
+                    if numero_completo:
+                        laudo_criado = True
+                        if '.' in numero_completo:
+                            partes = numero_completo.split('.')
+                            try:
+                                ano_laudo = int(partes[0])
+                            except ValueError:
+                                pass
+                            num_laudo = partes[1]
+                        else:
+                            num_laudo = str(numero_completo)
+                
+                if not num_laudo:
+                    erros += 1
+                    continue
+                
+                local_ctx.numero_laudo = num_laudo
+                local_ctx.ano = ano_laudo if ano_laudo else datetime.now().year
+                local_ctx.cancel_event = self.cancel_event
+
+                try:
+                    services.enviar_ao_storage(
+                        local_ctx, 
+                        confirmar_sobrescrever=self.parent_dlg.perguntar_sobrescrever_storage_lote, 
+                        cancel_event=self.cancel_event
+                    )
+                    sucessos += 1
+                except Exception:
+                    erros += 1
+
+        self.finished_signal.emit(sucessos, erros)
+
+
+# ---------------------------------------------------------------------------
+# Settings Dialog (Configurações)
+# ---------------------------------------------------------------------------
+
+class SettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Configurações do GAD")
+        self.setMinimumWidth(550)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Pasta Raiz Local
+        layout.addWidget(QLabel("<b>Pasta Raiz Local:</b>"))
+        h_layout1 = QHBoxLayout()
+        self.entry_raiz = QLineEdit()
+        self.btn_buscar_raiz = QPushButton("Buscar")
+        self.btn_buscar_raiz.clicked.connect(self.buscar_raiz)
+        h_layout1.addWidget(self.entry_raiz)
+        h_layout1.addWidget(self.btn_buscar_raiz)
+        layout.addLayout(h_layout1)
+
+        # Destino Storage
+        layout.addWidget(QLabel("<b>Destino Storage (Rede):</b>"))
+        self.entry_storage = QLineEdit()
+        layout.addWidget(self.entry_storage)
+
+        # Destino Backup
+        layout.addWidget(QLabel("<b>Destino de Backup:</b>"))
+        h_layout2 = QHBoxLayout()
+        self.entry_backup = QLineEdit()
+        self.btn_buscar_backup = QPushButton("Buscar")
+        self.btn_buscar_backup.clicked.connect(self.buscar_backup)
+        h_layout2.addWidget(self.entry_backup)
+        h_layout2.addWidget(self.btn_buscar_backup)
+        layout.addLayout(h_layout2)
+
+        # Buttons
+        h_buttons = QHBoxLayout()
+        h_buttons.addStretch()
+        self.btn_salvar = QPushButton("Salvar Configurações")
+        self.btn_salvar.setObjectName("btn_consultar") # cyan accent
+        self.btn_salvar.clicked.connect(self.salvar)
+        self.btn_cancelar = QPushButton("Cancelar")
+        self.btn_cancelar.clicked.connect(self.reject)
+        h_buttons.addWidget(self.btn_cancelar)
+        h_buttons.addWidget(self.btn_salvar)
+        
+        layout.addSpacing(10)
+        layout.addLayout(h_buttons)
+
+        self.carregar_configuracoes()
+
+    def carregar_configuracoes(self):
+        config = utils.carregar_config()
+        self.entry_raiz.setText(config.get('pasta_raiz', ''))
+        self.entry_storage.setText(config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos'))
+        self.entry_backup.setText(config.get('destino_backup', ''))
+
+    def buscar_raiz(self):
+        dir_path = QFileDialog.getExistingDirectory(self, "Selecionar Pasta Raiz")
+        if dir_path:
+            self.entry_raiz.setText(dir_path)
+
+    def buscar_backup(self):
+        dir_path = QFileDialog.getExistingDirectory(self, "Selecionar Pasta de Backup")
+        if dir_path:
+            self.entry_backup.setText(dir_path)
+
+    def salvar(self):
+        config = {
+            'pasta_raiz': self.entry_raiz.text().strip(),
+            'destino_storage': self.entry_storage.text().strip(),
+            'destino_backup': self.entry_backup.text().strip()
+        }
+        if utils.salvar_config(config):
+            QMessageBox.information(self, "Sucesso", "Configurações salvas com sucesso!")
+            self.accept()
+        else:
+            QMessageBox.critical(self, "Erro", "Não foi possível salvar as configurações.")
+
+
+# ---------------------------------------------------------------------------
+# Processes Manager Dialog (Processos Locais)
+# ---------------------------------------------------------------------------
+
+class ProcessesDialog(QDialog):
+    sig_perguntar_sobrescrever_storage = Signal(str)
+    sig_perguntar_sobrescrever_backup = Signal(str)
+
+    def __init__(self, main_ctx, config, parent=None):
+        super().__init__(parent)
+        self.main_ctx = main_ctx
+        self.config = config
+        self.setWindowTitle("Processos Locais")
+        self.resize(850, 520)
+        
+        self.batch_worker = None
+        self.calc_worker = None
+        self.sobrescrever_storage_result = False
+        self.sobrescrever_storage_event = threading.Event()
+        self.sobrescrever_backup_result = False
+        self.sobrescrever_backup_event = threading.Event()
+
+        self.sig_perguntar_sobrescrever_storage.connect(self._on_perguntar_storage)
+        self.sig_perguntar_sobrescrever_backup.connect(self._on_perguntar_backup)
+
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
+        # Status Label
+        self.lbl_status = QLabel("Carregando processos... aguarde.")
+        self.lbl_status.setStyleSheet("font-weight: bold; color: #00ADB5;")
+        layout.addWidget(self.lbl_status)
+
+        # Table
+        self.table = QTableWidget()
+        self.table.setColumnCount(2)
+        self.table.setHorizontalHeaderLabels(["Nome da Pasta", "Tamanho Ocupado"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.itemSelectionChanged.connect(self.ao_selecionar_pasta)
+        layout.addWidget(self.table)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
+        # Action Buttons Layout
+        self.frame_acoes = QHBoxLayout()
+        
+        self.btn_recriar = QPushButton("ReCriar Diretórios")
+        self.btn_recriar.clicked.connect(self.recriar_diretorios_lote)
+        
+        self.btn_processar = QPushButton("1. Processar Anexos")
+        self.btn_processar.setObjectName("btn_processar")
+        self.btn_processar.clicked.connect(self.processar_anexos_lote)
+
+        self.btn_reprocessar = QPushButton("ReProcessar")
+        self.btn_reprocessar.clicked.connect(self.processar_anexos_lote)
+
+        self.btn_abrir = QPushButton("Abrir Pasta")
+        self.btn_abrir.clicked.connect(self.abrir_pasta)
+
+        self.btn_enviar = QPushButton("2. Enviar p/ Storage")
+        self.btn_enviar.setObjectName("btn_enviar")
+        self.btn_enviar.clicked.connect(self.enviar_storage_lote)
+
+        self.btn_limpar = QPushButton("Limpar Extração")
+        self.btn_limpar.clicked.connect(self.limpar_extracao_lote)
+
+        self.btn_backup = QPushButton("Backup & Limpar")
+        self.btn_backup.clicked.connect(self.backup_limpar_lote)
+
+        self.chk_auto = QCheckBox("Auto Enviar")
+        self.chk_auto.setChecked(True)
+
+        self.btn_cancelar = QPushButton("Cancelar")
+        self.btn_cancelar.setObjectName("btn_cancelar")
+        self.btn_cancelar.setVisible(False)
+        self.btn_cancelar.clicked.connect(self.cancelar_lote)
+
+        self.frame_acoes.addWidget(self.chk_auto)
+        self.frame_acoes.addWidget(self.btn_recriar)
+        self.frame_acoes.addWidget(self.btn_processar)
+        self.frame_acoes.addWidget(self.btn_reprocessar)
+        self.frame_acoes.addWidget(self.btn_abrir)
+        self.frame_acoes.addWidget(self.btn_enviar)
+        self.frame_acoes.addWidget(self.btn_limpar)
+        self.frame_acoes.addWidget(self.btn_backup)
+        self.frame_acoes.addWidget(self.btn_cancelar)
+
+        layout.addLayout(self.frame_acoes)
+
+        self.atualizar_tamanhos_tabela()
+        self.atualizar_botoes()
+
+    def popular_linha_tabela(self, nome_pasta, tamanho_formatado):
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        
+        item_nome = QTableWidgetItem(nome_pasta)
+        item_nome.setFlags(item_nome.flags() ^ Qt.ItemFlag.ItemIsEditable)
+        
+        item_tam = QTableWidgetItem(tamanho_formatado)
+        item_tam.setFlags(item_tam.flags() ^ Qt.ItemFlag.ItemIsEditable)
+        item_tam.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        
+        self.table.setItem(row, 0, item_nome)
+        self.table.setItem(row, 1, item_tam)
+
+    def calc_finished(self):
+        self.lbl_status.setText("Cálculo concluído.")
+        self.atualizar_botoes()
+
+    def atualizar_tamanhos_tabela(self):
+        self.table.setRowCount(0)
+        self.lbl_status.setText("Calculando tamanhos... por favor aguarde.")
+        
+        pasta_raiz = self.config.get('pasta_raiz')
+        if not pasta_raiz or not os.path.isdir(pasta_raiz):
+            self.lbl_status.setText("Pasta raiz local inválida.")
+            return
+
+        self.calc_worker = SizeCalculatorWorker(pasta_raiz)
+        self.calc_worker.item_calculated.connect(self.popular_linha_tabela)
+        self.calc_worker.finished_signal.connect(self.calc_finished)
+        self.calc_worker.start()
+
+    def obter_contexto_pasta(self, nome_pasta):
+        pasta_raiz = self.config.get('pasta_raiz')
+        caminho_pasta = os.path.join(pasta_raiz, nome_pasta)
+        protocolo = ""
+        if ".Prot_" in nome_pasta:
+            protocolo = nome_pasta.split(".Prot_")[1]
+        
+        caminho_json = os.path.join(caminho_pasta, 'Laudo', 'dados_protocolo.json')
+        if os.path.exists(caminho_json):
+            try:
+                with open(caminho_json, 'r', encoding='utf-8') as f:
+                    dados = json.load(f)
+                local_ctx = utils.ProtocoloContext()
+                local_ctx.dados = dados
+                local_ctx.protocolo = protocolo
+                local_ctx.caminho_base = caminho_pasta
+                utils.tentar_restaurar_processamento(local_ctx)
+                return local_ctx
+            except Exception:
+                return None
+        return None
+
+    def ao_selecionar_pasta(self):
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            self.atualizar_botoes()
+            return
+        
+        # O primeiro item selecionado
+        row = selected_items[0].row()
+        nome_pasta = self.table.item(row, 0).text()
+        
+        pasta_raiz = self.config.get('pasta_raiz')
+        caminho_pasta = os.path.join(pasta_raiz, nome_pasta)
+        
+        protocolo = ""
+        if ".Prot_" in nome_pasta:
+            protocolo = nome_pasta.split(".Prot_")[1]
+        
+        caminho_json = os.path.join(caminho_pasta, 'Laudo', 'dados_protocolo.json')
+        if os.path.exists(caminho_json):
+            try:
+                with open(caminho_json, 'r', encoding='utf-8') as f:
+                    dados = json.load(f)
+                self.main_ctx.dados = dados
+                self.main_ctx.protocolo = protocolo
+                self.main_ctx.caminho_base = caminho_pasta
+                self.main_ctx.caminho_zip = ""
+                self.main_ctx.senha = ""
+                self.main_ctx.hash_diretorio = ""
+                self.main_ctx.ano = 0
+                self.main_ctx.numero_laudo = ""
+                utils.tentar_restaurar_processamento(self.main_ctx)
+                
+                caminho_txt = os.path.join(caminho_pasta, 'Laudo', 'Resumo_Laudo.txt')
+                if os.path.exists(caminho_txt):
+                    with open(caminho_txt, 'r', encoding='utf-8') as f_txt:
+                        self.main_ctx.texto_resultado = f_txt.read()
+                else:
+                    self.main_ctx.texto_resultado = ""
+            except Exception as e:
+                print(f"Erro ao carregar dados do diretório selecionado: {e}")
+        self.atualizar_botoes()
+
+    def obter_pastas_selecionadas(self):
+        selected_rows = set()
+        for idx in self.table.selectedIndexes():
+            selected_rows.add(idx.row())
+        
+        folders = []
+        for r in selected_rows:
+            folders.append(self.table.item(r, 0).text())
+        return folders
+
+    def verificar_se_ja_enviado(self, local_ctx):
+        if not local_ctx.caminho_base or not os.path.exists(local_ctx.caminho_base):
+            return False
+            
+        pasta_anexo = os.path.join(local_ctx.caminho_base, 'Relatorios', 'Anexo Digital')
+        arquivo_info = os.path.join(pasta_anexo, 'INFO.txt')
+        if not os.path.exists(arquivo_info):
+            return False
+            
+        url_storage = None
+        try:
+            with open(arquivo_info, 'r', encoding='utf-8') as f:
+                for linha in f:
+                    linha = linha.strip()
+                    if linha.startswith("URL Storage:"):
+                        url_storage = linha.split(":", 1)[1].strip()
+                        break
+        except Exception:
+            return False
+            
+        if not url_storage or "/laudos/" not in url_storage:
+            return False
+            
+        caminho_relativo = url_storage.split("/laudos/", 1)[1]
+        partes = caminho_relativo.split('/')
+        
+        storage_base = self.config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos')
+        destino_arquivo = os.path.join(storage_base, *partes)
         
         try:
-            os.makedirs(caminho_base, exist_ok=True)
-            for pasta in pastas_para_criar:
-                os.makedirs(os.path.join(caminho_base, pasta), exist_ok=True)
-            caminho_json = os.path.join(caminho_base, 'Laudo', 'dados_protocolo.json')
-            with open(caminho_json, 'w', encoding='utf-8') as f:
-                json.dump(ctx.dados, f, indent=4, ensure_ascii=False)
-            if ctx.texto_resultado:
-                caminho_txt = os.path.join(caminho_base, 'Laudo', 'Resumo_Laudo.txt')
-                utils.salvar_resumo_txt(caminho_txt, ctx.protocolo, ctx.texto_resultado)
-            messagebox.showinfo("Sucesso", f"Diretórios recriados com sucesso em:\n{caminho_base}")
-            ctx.caminho_zip = ""
-            ctx.senha = ""
-            ctx.hash_diretorio = ""
-            atualizar_botoes_gui()
-            os.startfile(caminho_base)
-            
-        except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao criar diretórios: {e}")
+            return os.path.exists(destino_arquivo)
+        except Exception:
+            return False
 
-    def perguntar_sobrescrever(caminho):
-        import queue
-        q = queue.Queue()
-        def ask():
-            res = messagebox.askyesno(
-                "Confirmar Sobrescrita", 
-                f"O arquivo já existe no destino:\n{caminho}\n\nDeseja sobrescrevê-lo?",
-                parent=janela
-            )
-            q.put(res)
-        janela.after(0, ask)
-        return q.get()
-
-    janela = tk.Tk()
-    janela.title("GAD (Gerenciador de Anexo Digital)")
-    janela.geometry("900x650")
-    
-    style = ttk.Style()
-    if "clam" in style.theme_names():
-        style.theme_use("clam")
+    def atualizar_botoes(self):
+        folders = self.obter_pastas_selecionadas()
+        qtd = len(folders)
         
-    style.configure("TButton", font=("Segoe UI", 10, "bold"), padding=5)
-    style.configure("Process.TButton", foreground="#FFFFFF", background="#3498DB")
-    style.map("Process.TButton", background=[("active", "#2980B9")])
-    style.configure("Action.TButton", foreground="#FFFFFF", background="#2ECC71")
-    style.map("Action.TButton", background=[("active", "#27AE60")])
-    style.configure("Upload.TButton", foreground="#FFFFFF", background="#9B59B6")
-    style.map("Upload.TButton", background=[("active", "#8E44AD")])
-    style.configure("Danger.TButton", foreground="#FFFFFF", background="#E74C3C")
-    style.map("Danger.TButton", background=[("active", "#C0392B")])
-    style.configure("TLabel", font=("Segoe UI", 11))
-    style.configure("TEntry", font=("Segoe UI", 11))
-    style.configure("Header.TLabel", font=("Segoe UI", 16, "bold"), foreground="#2C3E50")
-    
-    menu_bar = tk.Menu(janela)
-    menu_config = tk.Menu(menu_bar, tearoff=0)
-    menu_config.add_command(label="Configurações...", command=abrir_configuracoes)
-    menu_config.add_separator()
-    menu_config.add_command(label="Processos locais...", command=listar_diretorios)
-    menu_bar.add_cascade(label="Configurações", menu=menu_config)
-    janela.config(menu=menu_bar)
-    
-    lbl_titulo = ttk.Label(janela, text="SISTEMA GAD", style="Header.TLabel")
-    lbl_titulo.pack(pady=(15, 5))
-    
+        # Oculta/Mostra botões com base no número de pastas selecionadas
+        self.btn_recriar.setVisible(qtd > 0)
+        self.btn_processar.setVisible(qtd > 1)
+        self.btn_reprocessar.setVisible(qtd > 0)
+        self.btn_abrir.setVisible(qtd == 1)
+        self.btn_enviar.setVisible(qtd > 0)
+        self.btn_limpar.setVisible(qtd > 0)
+        self.btn_backup.setVisible(qtd > 0)
+        self.chk_auto.setVisible(qtd > 0)
 
-    
-    frame_top = ttk.Frame(janela)
-    frame_top.pack(pady=10, padx=20, fill=tk.X)
-    
-    frame_botoes = ttk.Frame(janela)
-    frame_botoes.pack(pady=5, padx=20, fill=tk.X)
-    
-    lbl_protocolo = ttk.Label(frame_top, text="Número do Protocolo:")
-    lbl_protocolo.pack(side=tk.LEFT, padx=(0, 10))
-    
-    entry_protocolo = ttk.Entry(frame_top, width=30)
-    entry_protocolo.pack(side=tk.LEFT, padx=5)
-    entry_protocolo.bind("<Return>", lambda event: realizar_consulta())
-    
-    btn_consultar = ttk.Button(frame_top, text="Consultar Protocolo", command=realizar_consulta)
-    btn_consultar.pack(side=tk.LEFT, padx=10)
-    
-    style.configure("Action.TButton", font=("Segoe UI", 10, "bold"), foreground="white", background="#007BFF")
-    style.map("Action.TButton", background=[("active", "#0056b3")])
-    
-    style.configure("Process.TButton", font=("Segoe UI", 10, "bold"), foreground="white", background="#28A745")
-    style.map("Process.TButton", background=[("active", "#218838")])
-    
-    style.configure("Upload.TButton", font=("Segoe UI", 10, "bold"), foreground="white", background="#6F42C1")
-    style.map("Upload.TButton", background=[("active", "#5A32A3")])
-    
-    style.configure("Danger.TButton", font=("Segoe UI", 10, "bold"), foreground="white", background="#DC3545")
-    style.map("Danger.TButton", background=[("active", "#C82333")])
+        if qtd == 1:
+            nome_pasta = folders[0]
+            local_ctx = self.obter_contexto_pasta(nome_pasta)
+            
+            # Decide se exibe "Processar" ou "Reprocessar"
+            processado = False
+            if local_ctx:
+                processado = utils.tentar_restaurar_processamento(local_ctx)
+                
+            self.btn_processar.setVisible(not processado)
+            self.btn_reprocessar.setVisible(processado)
+            
+            if processado and local_ctx:
+                if self.verificar_se_ja_enviado(local_ctx):
+                    self.btn_enviar.setText("Reenviar p/ Storage")
+                else:
+                    self.btn_enviar.setText("2. Enviar p/ Storage")
+            else:
+                self.btn_enviar.setText("2. Enviar p/ Storage")
+        elif qtd > 1:
+            self.btn_enviar.setText("2. Enviar p/ Storage")
 
-    btn_criar_dir = ttk.Button(frame_botoes, text="Criar Diretórios GAD", style="Action.TButton", command=criar_diretorios, state=tk.DISABLED)
-    btn_recriar_dir = ttk.Button(frame_botoes, text="Recriar Diretórios", style="Danger.TButton", command=recriar_diretorios)
-    
-    def processar_anexos_gui():
-        if not ctx.dados or not ctx.protocolo:
+    def bloquear_controles(self, bloquear):
+        state = not bloquear
+        self.btn_recriar.setEnabled(state)
+        self.btn_processar.setEnabled(state)
+        self.btn_reprocessar.setEnabled(state)
+        self.btn_abrir.setEnabled(state)
+        self.btn_enviar.setEnabled(state)
+        self.btn_limpar.setEnabled(state)
+        self.btn_backup.setEnabled(state)
+        self.chk_auto.setEnabled(state)
+        self.table.setEnabled(state)
+
+    def iniciar_execucao_lote(self, task_type, selected_folders):
+        pasta_raiz = self.config.get('pasta_raiz')
+        destino_storage = self.config.get('destino_storage')
+        destino_backup = self.config.get('destino_backup')
+        
+        self.bloqueiar_controles(True)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.btn_cancelar.setVisible(True)
+
+        self.batch_worker = BatchWorker(
+            task_type, 
+            selected_folders, 
+            pasta_raiz, 
+            destino_storage, 
+            destino_backup, 
+            self.chk_auto.isChecked(), 
+            self
+        )
+        self.batch_worker.progress_signal.connect(self.atualizar_progresso_lote)
+        self.batch_worker.finished_signal.connect(self.finalizar_execucao_lote)
+        self.batch_worker.start()
+
+    def atualizar_progresso_lote(self, pct, desc):
+        self.progress_bar.setValue(pct)
+        self.lbl_status.setText(desc)
+
+    def finalizar_execucao_lote(self, sucessos, erros):
+        self.progress_bar.setVisible(False)
+        self.btn_cancelar.setVisible(False)
+        self.bloqueiar_controles(False)
+        
+        self.lbl_status.setText(f"Execução concluída. Sucessos: {sucessos}, Erros: {erros}.")
+        
+        if self.batch_worker and self.batch_worker.task_type == 'backup':
+            QMessageBox.information(
+                self, 
+                "Backup Concluído", 
+                f"O processo de backup foi finalizado com sucesso!\n\nSucessos: {sucessos}\nErros: {erros}"
+            )
+
+        self.atualizar_tamanhos_tabela()
+
+    def cancelar_lote(self):
+        reply = QMessageBox.question(
+            self, 
+            "Confirmar Cancelamento", 
+            "Deseja realmente cancelar a execução em lote?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            if self.batch_worker:
+                self.batch_worker.cancel_event.set()
+                self.lbl_status.setText("Execução cancelada pelo usuário.")
+                self.progress_bar.setVisible(False)
+                self.btn_cancelar.setVisible(False)
+                self.bloqueiar_controles(False)
+
+    def perguntar_sobrescrever_storage_lote(self, caminho):
+        self.sig_perguntar_sobrescrever_storage.emit(caminho)
+        self.sobrescrever_storage_event.wait()
+        return self.sobrescrever_storage_result
+
+    def _on_perguntar_storage(self, caminho):
+        reply = QMessageBox.question(
+            self, 
+            "Confirmar Sobrescrita", 
+            f"O arquivo já existe no destino:\n{caminho}\n\nDeseja sobrescrevê-lo?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        self.sobrescrever_storage_result = (reply == QMessageBox.StandardButton.Yes)
+        self.sobrescrever_storage_event.set()
+
+    def perguntar_sobrescrever_backup_lote(self, nome_pasta):
+        self.sig_perguntar_sobrescrever_backup.emit(nome_pasta)
+        self.sobrescrever_backup_event.wait()
+        return self.sobrescrever_backup_result
+
+    def _on_perguntar_backup(self, nome_pasta):
+        reply = QMessageBox.question(
+            self, 
+            "Sobrescrever Backup", 
+            f"O arquivo de backup '{nome_pasta}.zip' já existe na pasta de destino.\nDeseja sobrescrevê-lo?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        self.sobrescrever_backup_result = (reply == QMessageBox.StandardButton.Yes)
+        self.sobrescrever_backup_event.set()
+
+    # --- AÇÕES EM LOTE ---
+
+    def limpar_extracao_lote(self):
+        folders = self.obter_pastas_selecionadas()
+        if not folders:
+            return
+        
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Limpeza",
+            f"Deseja realmente limpar a pasta 'Extração' de todos os {len(folders)} processos selecionados?\nEsta ação apagará permanentemente todos os arquivos contidos nessa pasta.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.iniciar_execucao_lote('clear', folders)
+
+    def backup_limpar_lote(self):
+        folders = self.obter_pastas_selecionadas()
+        if not folders:
             return
             
-        caminho_base = utils.obter_caminho_base(ctx.protocolo, ctx.dados, config.get('pasta_raiz'))
+        destino_backup = self.config.get('destino_backup')
+        if not destino_backup or not os.path.isdir(destino_backup):
+            QMessageBox.critical(self, "Erro", "Destino de backup não configurado ou inválido nas configurações.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Backup & Limpeza",
+            f"Deseja realmente compactar e fazer backup de todos os {len(folders)} processos selecionados?\nApós a conclusão, as pastas locais originais e os arquivos ZIP locais serão APAGADOS permanentemente.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.iniciar_execucao_lote('backup', folders)
+
+    def recriar_diretorios_lote(self):
+        folders = self.obter_pastas_selecionadas()
+        if not folders:
+            return
+        
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Recriação em Lote",
+            f"Deseja realmente RECRIAR os diretórios dos {len(folders)} processos selecionados?\nTodos os arquivos existentes nestas pastas serão apagados permanentemente!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.iniciar_execucao_lote('recreate', folders)
+
+    def processar_anexos_lote(self):
+        folders = self.obter_pastas_selecionadas()
+        if not folders:
+            return
+        self.iniciar_execucao_lote('process', folders)
+
+    def enviar_storage_lote(self):
+        folders = self.obter_pastas_selecionadas()
+        if not folders:
+            return
+        self.iniciar_execucao_lote('upload', folders)
+
+    def abrir_pasta(self):
+        folders = self.obter_pastas_selecionadas()
+        if len(folders) == 1:
+            pasta_raiz = self.config.get('pasta_raiz')
+            caminho_base = os.path.join(pasta_raiz, folders[0])
+            if os.path.exists(caminho_base):
+                os.startfile(caminho_base)
+
+
+# ---------------------------------------------------------------------------
+# Main Application Window (Janela Principal GAD)
+# ---------------------------------------------------------------------------
+
+class MainWindow(QMainWindow):
+    sig_perguntar_sobrescrever = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("GAD (Gerenciador de Anexo Digital)")
+        self.resize(950, 700)
+        
+        self.ctx = utils.ProtocoloContext()
+        self.ctx.cancel_event = threading.Event()
+        self.config = utils.carregar_config()
+
+        self.query_worker = None
+        self.process_worker = None
+        self.upload_worker = None
+        
+        # Thread communication for overwrite prompt
+        self.sobrescrever_result = False
+        self.sobrescrever_event = threading.Event()
+        self.sig_perguntar_sobrescrever.connect(self._on_perguntar_sobrescrever)
+
+        self.init_ui()
+
+    def init_ui(self):
+        # Menu Bar
+        menu_bar = self.menuBar()
+        menu_config = menu_bar.addMenu("Configurações")
+        
+        action_config = QAction("Configurações...", self)
+        action_config.triggered.connect(self.abrir_configuracoes)
+        
+        action_lista = QAction("Processos locais...", self)
+        action_lista.triggered.connect(self.listar_diretorios)
+        
+        menu_config.addAction(action_config)
+        menu_config.addSeparator()
+        menu_config.addAction(action_lista)
+
+        # Central Widget
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+
+        # Main Layout
+        layout = QVBoxLayout(self.central_widget)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(12)
+
+        # Header Title
+        self.lbl_titulo = QLabel("SISTEMA GAD")
+        self.lbl_titulo.setObjectName("lbl_titulo")
+        self.lbl_titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.lbl_titulo)
+
+        # Top area (Query Protocol)
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(10)
+        
+        self.lbl_protocolo = QLabel("Número do Protocolo:")
+        self.entry_protocolo = QLineEdit()
+        self.entry_protocolo.setPlaceholderText("Digite o protocolo...")
+        self.entry_protocolo.returnPressed.connect(self.realizar_consulta)
+        
+        self.btn_consultar = QPushButton("Consultar Protocolo")
+        self.btn_consultar.setObjectName("btn_consultar") # cyan accent
+        self.btn_consultar.clicked.connect(self.realizar_consulta)
+
+        self.chk_exibir_tabela = QCheckBox("Exibir Tabela de Dados")
+        self.chk_exibir_tabela.setChecked(False)
+        self.chk_exibir_tabela.stateChanged.connect(self.toggle_tabela)
+
+        top_layout.addWidget(self.lbl_protocolo)
+        top_layout.addWidget(self.entry_protocolo, 1)
+        top_layout.addWidget(self.btn_consultar)
+        top_layout.addWidget(self.chk_exibir_tabela)
+        
+        layout.addLayout(top_layout)
+
+        # Action Buttons Layout (Horizontal)
+        self.frame_botoes = QHBoxLayout()
+        self.frame_botoes.setSpacing(8)
+
+        self.btn_criar_dir = QPushButton("Criar Diretórios GAD")
+        self.btn_criar_dir.setObjectName("btn_criar")
+        self.btn_criar_dir.clicked.connect(self.criar_diretorios)
+        self.btn_criar_dir.setVisible(False)
+
+        self.btn_recriar_dir = QPushButton("Recriar Diretórios")
+        self.btn_recriar_dir.setObjectName("btn_recriar")
+        self.btn_recriar_dir.clicked.connect(self.recriar_diretorios)
+        self.btn_recriar_dir.setVisible(False)
+
+        self.btn_processar = QPushButton("1. Processar Anexos (ZIP/Hash)")
+        self.btn_processar.setObjectName("btn_processar")
+        self.btn_processar.clicked.connect(self.processar_anexos_gui)
+        self.btn_processar.setVisible(False)
+
+        self.btn_reprocessar = QPushButton("Reprocessar")
+        self.btn_reprocessar.clicked.connect(self.processar_anexos_gui)
+        self.btn_reprocessar.setVisible(False)
+
+        self.btn_abrir_dir = QPushButton("Abrir Pasta")
+        self.btn_abrir_dir.clicked.connect(self.abrir_pasta_atual)
+        self.btn_abrir_dir.setVisible(False)
+
+        self.btn_enviar = QPushButton("2. Enviar p/ Storage")
+        self.btn_enviar.setObjectName("btn_enviar")
+        self.btn_enviar.clicked.connect(self.enviar_storage_gui)
+        self.btn_enviar.setVisible(False)
+
+        self.btn_cancelar_envio = QPushButton("Cancelar Envio")
+        self.btn_cancelar_envio.setObjectName("btn_cancelar")
+        self.btn_cancelar_envio.clicked.connect(self.cancelar_envio_gui)
+        self.btn_cancelar_envio.setVisible(False)
+
+        self.chk_auto = QCheckBox("Enviar automaticamente ao Storage")
+        self.chk_auto.setChecked(True)
+        self.chk_auto.stateChanged.connect(self.sync_auto)
+        self.chk_auto.setVisible(False)
+
+        self.frame_botoes.addWidget(self.chk_auto)
+        self.frame_botoes.addWidget(self.btn_criar_dir)
+        self.frame_botoes.addWidget(self.btn_recriar_dir)
+        self.frame_botoes.addWidget(self.btn_processar)
+        self.frame_botoes.addWidget(self.btn_reprocessar)
+        self.frame_botoes.addWidget(self.btn_abrir_dir)
+        self.frame_botoes.addWidget(self.btn_enviar)
+        self.frame_botoes.addWidget(self.btn_cancelar_envio)
+        self.frame_botoes.addStretch()
+
+        layout.addLayout(self.frame_botoes)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
+        # Text Console Output
+        self.txt_resultado = QTextEdit()
+        self.txt_resultado.setReadOnly(True)
+        self.txt_resultado.setPlaceholderText("Resultados e logs de processamento serão exibidos aqui...")
+        layout.addWidget(self.txt_resultado)
+
+        # Table Viewer
+        self.table_dados = QTableWidget()
+        self.table_dados.setVisible(False)
+        layout.addWidget(self.table_dados)
+
+        self.sync_auto()
+
+    def sync_auto(self):
+        self.ctx.auto_enviar = self.chk_auto.isChecked()
+
+    def toggle_tabela(self, state):
+        self.table_dados.setVisible(self.chk_exibir_tabela.isChecked())
+
+    def log(self, text, style="info"):
+        cursor = self.txt_resultado.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        
+        color = "#e1e1e6" # default
+        font_weight = "normal"
+        if style == "success":
+            color = "#04D361"
+            font_weight = "bold"
+        elif style == "error":
+            color = "#E23E3E"
+            font_weight = "bold"
+        elif style == "warning":
+            color = "#FF8C00"
+            font_weight = "bold"
+            
+        html = f'<span style="color: {color}; font-weight: {font_weight};">{text}</span>'
+        cursor.insertHtml(html)
+        cursor.insertText("\n")
+        self.txt_resultado.setTextCursor(cursor)
+        self.txt_resultado.ensureCursorVisible()
+
+    # --- CONSULTA ---
+
+    def realizar_consulta(self):
+        protocolo = self.entry_protocolo.text().strip()
+        if not protocolo:
+            QMessageBox.warning(self, "Aviso", "Por favor, informe o número do protocolo.")
+            return
+
+        self.btn_consultar.setEnabled(False)
+        self.entry_protocolo.setEnabled(False)
+        
+        # Oculta botões antigos
+        self.btn_criar_dir.setVisible(False)
+        self.btn_recriar_dir.setVisible(False)
+        self.btn_processar.setVisible(False)
+        self.btn_reprocessar.setVisible(False)
+        self.btn_abrir_dir.setVisible(False)
+        self.btn_enviar.setVisible(False)
+        self.btn_cancelar_envio.setVisible(False)
+        self.chk_auto.setVisible(False)
+
+        self.txt_resultado.clear()
+        self.log("Consultando... aguarde.", "info")
+
+        self.query_worker = QueryWorker(protocolo)
+        self.query_worker.finished_signal.connect(self.consulta_concluida)
+        self.query_worker.start()
+
+    def consulta_concluida(self, sucesso, resultado, dados_brutos, chaves, tabela):
+        self.btn_consultar.setEnabled(True)
+        self.entry_protocolo.setEnabled(True)
+        self.txt_resultado.clear()
+
+        # Extrai apenas as mensagens de status (tudo antes da tabela ASCII)
+        if '+' in resultado:
+            status_text = resultado.split('+')[0].strip() + '\n'
+        else:
+            status_text = resultado
+
+        # Aplica realce na mensagem
+        if "✅ DADOS RECUPERADOS COM SUCESSO! ✅" in status_text:
+            partes = status_text.split("✅ DADOS RECUPERADOS COM SUCESSO! ✅")
+            self.log(partes[0], "info")
+            self.log("✅ DADOS RECUPERADOS COM SUCESSO! ✅", "success")
+            if len(partes) > 1:
+                self.log(partes[1], "info")
+        elif "⚠️ PROTOCOLO NÃO ENCONTRADO ⚠️" in status_text:
+            partes = status_text.split("⚠️ PROTOCOLO NÃO ENCONTRADO ⚠️")
+            self.log(partes[0], "info")
+            self.log("⚠️ PROTOCOLO NÃO ENCONTRADO ⚠️", "error")
+            if len(partes) > 1:
+                self.log(partes[1], "info")
+        else:
+            self.log(status_text, "info")
+
+        # Configura tabela
+        self.table_dados.setRowCount(0)
+        self.table_dados.setColumnCount(len(chaves))
+        self.table_dados.setHorizontalHeaderLabels(chaves)
+        
+        for col_idx, col in enumerate(chaves):
+            self.table_dados.horizontalHeader().setSectionResizeMode(col_idx, QHeaderView.ResizeMode.ResizeToContents)
+            
+        for row_idx, row_data in enumerate(tabela):
+            self.table_dados.insertRow(row_idx)
+            for col_idx, val in enumerate(row_data):
+                item = QTableWidgetItem(str(val))
+                item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
+                self.table_dados.setItem(row_idx, col_idx, item)
+
+        if sucesso:
+            self.ctx.dados = dados_brutos
+            self.ctx.protocolo = self.entry_protocolo.text().strip()
+            self.ctx.texto_resultado = resultado
+            self.ctx.caminho_base = utils.obter_caminho_base(self.ctx.protocolo, dados_brutos, self.config.get('pasta_raiz'))
+            self.chk_auto.setVisible(True)
+            self.atualizar_botoes_gui()
+            
+            if self.ctx.caminho_base and os.path.exists(self.ctx.caminho_base):
+                aviso_msg = f"\nℹ️ AVISO: O diretório para este protocolo já existe em:\n{self.ctx.caminho_base}\n"
+                self.log(aviso_msg, "warning")
+        else:
+            self.ctx.reset()
+            self.atualizar_botoes_gui()
+
+    # --- PROCESSAMENTO ---
+
+    def processar_anexos_gui(self):
+        if not self.ctx.dados or not self.ctx.protocolo:
+            return
+            
+        caminho_base = utils.obter_caminho_base(self.ctx.protocolo, self.ctx.dados, self.config.get('pasta_raiz'))
         if not caminho_base or not os.path.exists(caminho_base):
-            messagebox.showerror("Erro", "O diretório do protocolo ainda não foi criado.")
+            QMessageBox.critical(self, "Erro", "O diretório do protocolo ainda não foi criado.")
             return
             
-        # Verifica se há laudo criado no sistema Galileu e extrai o número e o ano
         laudo_criado = False
         num_laudo = None
         ano_laudo = None
         
-        if isinstance(ctx.dados, dict):
-            laudo = ctx.dados.get('laudo')
+        if isinstance(self.ctx.dados, dict):
+            laudo = self.ctx.dados.get('laudo')
             if isinstance(laudo, dict):
                 numero_completo = laudo.get('numeroCompleto')
                 if numero_completo:
@@ -931,430 +1407,310 @@ def iniciar_interface():
                         num_laudo = str(numero_completo)
                         
         if not laudo_criado or not num_laudo:
-            messagebox.showwarning("Aviso", "Não foi encontrado nenhum laudo criado para este protocolo no Galileu.\nPor favor, primeiro crie um número de laudo no Galileu.")
+            QMessageBox.warning(
+                self, 
+                "Aviso", 
+                "Não foi encontrado nenhum laudo criado para este protocolo no Galileu.\nPor favor, primeiro crie um número de laudo no Galileu."
+            )
             return
             
-        ctx.numero_laudo = num_laudo
-        if ano_laudo:
-            ctx.ano = ano_laudo
-        else:
-            from datetime import datetime
-            if isinstance(ctx.dados, dict) and 'ano' in ctx.dados:
-                ctx.ano = ctx.dados['ano']
-            else:
-                ctx.ano = datetime.now().year
-                
-        # Sobrescreve o dados_protocolo.json local com os dados atualizados em memória
+        self.ctx.numero_laudo = num_laudo
+        self.ctx.ano = ano_laudo if ano_laudo else (self.ctx.dados.get('ano', datetime.now().year) if isinstance(self.ctx.dados, dict) else datetime.now().year)
+
+        # Salva dados atualizados
         caminho_json = os.path.join(caminho_base, 'Laudo', 'dados_protocolo.json')
         try:
             with open(caminho_json, 'w', encoding='utf-8') as f:
-                json.dump(ctx.dados, f, indent=4, ensure_ascii=False)
+                json.dump(self.ctx.dados, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            print(f"Erro ao atualizar dados_protocolo.json: {e}")
-            
-        btn_processar.config(state=tk.DISABLED)
-        btn_reprocessar.config(state=tk.DISABLED)
-        progress_bar.pack(side=tk.LEFT, padx=5)
-        progress_bar.config(mode='determinate', maximum=100, value=0)
+            print(f"Erro ao salvar dados_protocolo.json: {e}")
 
-        import queue
-        spinner_frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-        spinner_state = {"index": 0, "active": False}
+        # Bloqueia botões
+        self.definir_estado_controles(False)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.txt_resultado.clear()
 
-        def animar_spinner():
-            if not spinner_state["active"] or not txt_resultado.winfo_exists():
-                return
-            try:
-                frame = spinner_frames[spinner_state["index"] % len(spinner_frames)]
-                spinner_state["index"] += 1
-                if "spinner_mark" in txt_resultado.mark_names():
-                    txt_resultado.config(state=tk.NORMAL)
-                    txt_resultado.delete("spinner_mark", "spinner_mark lineend")
-                    txt_resultado.insert("spinner_mark", f"[{frame}]", "aviso")
-                    txt_resultado.config(state=tk.DISABLED)
-            except Exception:
-                pass
-            janela.after(100, animar_spinner)
+        if self.chk_auto.isChecked():
+            self.btn_cancelar_envio.setVisible(True)
 
-        def finalizar_etapa_anterior(sucesso=True):
-            if "spinner_mark" in txt_resultado.mark_names():
-                spinner_state["active"] = False
-                tag = "sucesso" if sucesso else "erro"
-                status_txt = "[SUCESSO]" if sucesso else "[FALHA]"
-                
-                q = queue.Queue()
-                def run():
-                    try:
-                        txt_resultado.config(state=tk.NORMAL)
-                        txt_resultado.delete("spinner_mark", "spinner_mark lineend")
-                        txt_resultado.insert("spinner_mark", status_txt, tag)
-                        txt_resultado.mark_unset("spinner_mark")
-                        txt_resultado.see(tk.END)
-                        txt_resultado.config(state=tk.DISABLED)
-                    except Exception:
-                        pass
-                    q.put(True)
-                janela.after(0, run)
-                q.get()
+        self.process_worker = ProcessWorker(self.ctx, self.chk_auto.isChecked(), self)
+        self.process_worker.progress_signal.connect(self.progresso_processo)
+        self.process_worker.log_signal.connect(self.log)
+        self.process_worker.finished_signal.connect(self.processo_concluido)
+        self.process_worker.start()
 
-        def iniciar_etapa(etapa_str, desc):
-            finalizar_etapa_anterior(sucesso=True)
-            
-            q = queue.Queue()
-            def run():
-                try:
-                    txt_resultado.config(state=tk.NORMAL)
-                    txt_resultado.insert(tk.END, f"-> {etapa_str}{desc} ... ")
-                    txt_resultado.mark_set("spinner_mark", "insert")
-                    txt_resultado.mark_gravity("spinner_mark", tk.LEFT)
-                    txt_resultado.insert(tk.END, "[⠋]\n")
-                    txt_resultado.see(tk.END)
-                    txt_resultado.config(state=tk.DISABLED)
-                except Exception:
-                    pass
-                q.put(True)
-            janela.after(0, run)
-            q.get()
-            
-            spinner_state["active"] = True
-            janela.after(100, animar_spinner)
+    def progresso_processo(self, pct, desc):
+        self.progress_bar.setValue(pct)
 
-        def callback_progresso_gui(pct, desc):
-            # Mapeia a porcentagem para a etapa correspondente
-            etapa_str = ""
-            if pct == 25:
-                etapa_str = "[Etapa 1/4] "
-            elif pct == 50:
-                etapa_str = "[Etapa 2/4] "
-            elif pct == 75:
-                etapa_str = "[Etapa 3/4] "
-            elif pct == 100:
-                etapa_str = "[Etapa 4/4] "
-                
-            janela.after(0, lambda: progress_bar.config(value=pct))
-            iniciar_etapa(etapa_str, desc)
+    def processo_concluido(self, sucesso, message):
+        self.progress_bar.setVisible(False)
+        self.btn_cancelar_envio.setVisible(False)
+        self.definir_estado_controles(True)
+        self.atualizar_botoes_gui()
 
-        def thread_proc():
-            try:
-                # Limpa e prepara a caixa de texto
-                q = queue.Queue()
-                def setup_txt():
-                    try:
-                        txt_resultado.config(state=tk.NORMAL)
-                        txt_resultado.delete("1.0", tk.END)
-                        txt_resultado.insert(tk.END, "Iniciando processamento de anexos...\n")
-                        txt_resultado.config(state=tk.DISABLED)
-                    except Exception:
-                        pass
-                    q.put(True)
-                janela.after(0, setup_txt)
-                q.get()
-                
-                services.processar_anexos(ctx, callback_progresso=callback_progresso_gui)
-                finalizar_etapa_anterior(sucesso=True)
-                janela.after(0, atualizar_botoes_gui)
-                
-                if ctx.auto_enviar:
-                    janela.after(0, lambda: btn_cancelar_envio.pack(side=tk.LEFT, padx=5))
-                    janela.after(0, lambda: definir_estado_controles(False))
-                    
-                    iniciar_etapa("[Envio] ", "Copiando arquivo para a rede")
-                    ctx.cancel_event.clear()
-                    try:
-                        destino = services.enviar_ao_storage(ctx, confirmar_sobrescrever=perguntar_sobrescrever, cancel_event=ctx.cancel_event)
-                        if not (ctx.cancel_event and ctx.cancel_event.is_set()):
-                            finalizar_etapa_anterior(sucesso=True)
-                            janela.after(0, lambda dest=destino: (
-                                txt_resultado.config(state=tk.NORMAL),
-                                txt_resultado.insert(tk.END, f"\n[SUCESSO] Processamento e envio concluídos com sucesso!\nSalvo em rede: {dest}\n", "sucesso"),
-                                txt_resultado.see(tk.END),
-                                txt_resultado.config(state=tk.DISABLED)
-                            ))
-                    except services.ServiceError as env_err:
-                        if not (ctx.cancel_event and ctx.cancel_event.is_set()):
-                            finalizar_etapa_anterior(sucesso=False)
-                            msg_err = f"\n[ERRO] Falha no envio ao Storage: {env_err}\n"
-                            janela.after(0, lambda msg=msg_err: (
-                                txt_resultado.config(state=tk.NORMAL),
-                                txt_resultado.insert(tk.END, msg, "erro"),
-                                txt_resultado.see(tk.END),
-                                txt_resultado.config(state=tk.DISABLED)
-                            ))
-                    finally:
-                        janela.after(0, lambda: btn_cancelar_envio.pack_forget())
-                        janela.after(0, lambda: definir_estado_controles(True))
-                else:
-                    janela.after(0, lambda: (
-                        txt_resultado.config(state=tk.NORMAL),
-                        txt_resultado.insert(tk.END, "\n[SUCESSO] Processamento de anexos concluído localmente com sucesso!\n", "sucesso"),
-                        txt_resultado.see(tk.END),
-                        txt_resultado.config(state=tk.DISABLED)
-                    ))
-            except services.ServiceError as e:
-                finalizar_etapa_anterior(sucesso=False)
-                msg_erro = f"\n[ERRO] Falha no processamento: {e}\n"
-                janela.after(0, lambda msg=msg_erro: (
-                    txt_resultado.config(state=tk.NORMAL),
-                    txt_resultado.insert(tk.END, msg, "erro"),
-                    txt_resultado.see(tk.END),
-                    txt_resultado.config(state=tk.DISABLED)
-                ))
-            finally:
-                janela.after(0, lambda: btn_processar.config(state=tk.NORMAL))
-                janela.after(0, lambda: btn_reprocessar.config(state=tk.NORMAL))
-                janela.after(0, lambda: progress_bar.stop())
-                janela.after(0, lambda: progress_bar.pack_forget())
-                janela.after(0, atualizar_botoes_gui)
-                
-        threading.Thread(target=thread_proc, daemon=True).start()
-        
-    def enviar_storage_gui():
-        btn_enviar.config(state=tk.DISABLED)
-        progress_bar.pack(side=tk.LEFT, padx=5)
-        progress_bar.start()
+    # --- UPLOAD ---
 
-        def thread_envio():
-            janela.after(0, lambda: btn_cancelar_envio.pack(side=tk.LEFT, padx=5))
-            janela.after(0, lambda: definir_estado_controles(False))
-            ctx.cancel_event.clear()
-            try:
-                destino = services.enviar_ao_storage(ctx, confirmar_sobrescrever=perguntar_sobrescrever, cancel_event=ctx.cancel_event)
-                if not (ctx.cancel_event and ctx.cancel_event.is_set()):
-                    janela.after(0, lambda: messagebox.showinfo("Upload Concluído", f"Arquivo enviado com sucesso para a rede:\n{destino}"))
-            except services.ServiceError as e:
-                if not (ctx.cancel_event and ctx.cancel_event.is_set()):
-                    msg_erro = f"Falha ao enviar para o Storage:\n{e}"
-                    janela.after(0, lambda msg=msg_erro: messagebox.showerror("Erro de Rede", msg))
-            finally:
-                janela.after(0, lambda: btn_cancelar_envio.pack_forget())
-                janela.after(0, lambda: definir_estado_controles(True))
-                janela.after(0, atualizar_botoes_gui)
-                janela.after(0, lambda: progress_bar.stop())
-                janela.after(0, lambda: progress_bar.pack_forget())
-                
-        threading.Thread(target=thread_envio, daemon=True).start()
+    def enviar_storage_gui(self):
+        self.definir_estado_controles(False)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.btn_cancelar_envio.setVisible(True)
+        self.log("\n-> [Envio] Copiando arquivo para a rede...", "info")
 
-    auto_enviar = tk.BooleanVar(value=True)
-    def sync_auto(*args):
-        ctx.auto_enviar = auto_enviar.get()
-    auto_enviar.trace_add('write', sync_auto)
-    sync_auto()
+        self.upload_worker = UploadWorker(self.ctx, self)
+        self.upload_worker.log_signal.connect(self.log)
+        self.upload_worker.finished_signal.connect(self.upload_concluido)
+        self.upload_worker.start()
 
-    chk_auto = ttk.Checkbutton(frame_botoes, text="Enviar automaticamente ao Storage", variable=auto_enviar)
-    # chk_auto.pack is now handled after a successful query
-    # Botões e barra de progresso do novo fluxo
-    btn_processar = ttk.Button(frame_botoes, text="1. Processar Anexos (ZIP/Hash)", style="Process.TButton", command=processar_anexos_gui)
-    btn_reprocessar = ttk.Button(frame_botoes, text="Reprocessar", style="Process.TButton", command=processar_anexos_gui)
-    btn_abrir_dir = ttk.Button(frame_botoes, text="Abrir Pasta", style="Action.TButton", command=lambda: os.startfile(ctx.caminho_base) if ctx.caminho_base else None)
-    btn_enviar = ttk.Button(frame_botoes, text="2. Enviar p/ Storage", style="Upload.TButton", command=enviar_storage_gui)
-    btn_cancelar_envio = ttk.Button(frame_botoes, text="Cancelar Envio", style="Danger.TButton", command=lambda: cancelar_envio_gui())
+    def upload_concluido(self, sucesso, destino_ou_erro):
+        self.progress_bar.setVisible(False)
+        self.btn_cancelar_envio.setVisible(False)
+        self.definir_estado_controles(True)
+        self.atualizar_botoes_gui()
 
-    def cancelar_envio_gui():
-        if messagebox.askyesno("Confirmar Cancelamento", "Deseja realmente cancelar o envio para o Storage?"):
-            if ctx.cancel_event:
-                ctx.cancel_event.set()
-                definir_estado_controles(True)
-                btn_cancelar_envio.pack_forget()
-                progress_bar.stop()
-                progress_bar.pack_forget()
-
-    def definir_estado_controles(ativo):
-        state = tk.NORMAL if ativo else tk.DISABLED
-        entry_state = tk.NORMAL if ativo else tk.DISABLED
-        menu_state = tk.NORMAL if ativo else tk.DISABLED
-        
-        entry_protocolo.config(state=entry_state)
-        btn_consultar.config(state=state)
-        btn_criar_dir.config(state=state)
-        btn_recriar_dir.config(state=state)
-        btn_processar.config(state=state)
-        btn_reprocessar.config(state=state)
-        btn_enviar.config(state=state)
-        chk_auto.config(state=state)
-        try:
-            menu_bar.entryconfig("Configurações", state=menu_state)
-        except Exception:
-            pass
-
-        for attr in ['btn_recriar_dir_list', 'btn_processar_list', 'btn_reprocessar_list', 'btn_enviar_list', 'chk_auto_list', 'btn_limpar_extracao_list', 'btn_backup_list']:
-            if hasattr(janela, attr):
-                try:
-                    getattr(janela, attr).config(state=state)
-                except Exception:
-                    pass
-        if hasattr(janela, 'tree_list'):
-            try:
-                janela.tree_list.config(selectmode="none" if not ativo else "extended")
-            except Exception:
-                pass
-
-    def atualizar_botoes_gui():
-        def verificar_se_ja_enviado(local_ctx):
-            if not local_ctx.caminho_base or not os.path.exists(local_ctx.caminho_base):
-                return False
-                
-            # Localize INFO.txt
-            pasta_anexo = os.path.join(local_ctx.caminho_base, 'Relatorios', 'Anexo Digital')
-            arquivo_info = os.path.join(pasta_anexo, 'INFO.txt')
-            if not os.path.exists(arquivo_info):
-                return False
-                
-            url_storage = None
-            try:
-                with open(arquivo_info, 'r', encoding='utf-8') as f:
-                    for linha in f:
-                        linha = linha.strip()
-                        if linha.startswith("URL Storage:"):
-                            url_storage = linha.split(":", 1)[1].strip()
-                            break
-            except Exception as e:
-                print(f"[DEBUG] Erro ao ler {arquivo_info}: {e}")
-                return False
-                
-            if not url_storage:
-                return False
-                
-            chave_laudos = "/laudos/"
-            if chave_laudos not in url_storage:
-                return False
-                
-            caminho_relativo = url_storage.split(chave_laudos, 1)[1]
-            partes = caminho_relativo.split('/')
-            
-            storage_base = config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos')
-            destino_arquivo = os.path.join(storage_base, *partes)
-            
-            print(f"[DEBUG] verificar_se_ja_enviado: destino_arquivo na rede = {destino_arquivo}")
-            try:
-                existe = os.path.exists(destino_arquivo)
-                print(f"[DEBUG] resultado de os.path.exists({destino_arquivo}) = {existe}")
-                return existe
-            except Exception as e:
-                print(f"[DEBUG] erro ao testar os.path.exists({destino_arquivo}): {e}")
-                return False
-
-        # 1. Main window
-        btn_criar_dir.pack_forget()
-        btn_recriar_dir.pack_forget()
-        btn_processar.pack_forget()
-        btn_reprocessar.pack_forget()
-        btn_abrir_dir.pack_forget()
-        btn_enviar.pack_forget()
-        chk_auto.pack_forget()
-        
-        if ctx.caminho_base:
-            chk_auto.pack(side=tk.LEFT, padx=5)
-            if os.path.exists(ctx.caminho_base):
-                btn_recriar_dir.pack(side=tk.LEFT, padx=5)
-                btn_abrir_dir.pack(side=tk.LEFT, padx=5)
-                if utils.tentar_restaurar_processamento(ctx):
-                    btn_reprocessar.pack(side=tk.LEFT, padx=5)
-                    btn_enviar.pack(side=tk.LEFT, padx=5)
-                    btn_enviar.config(state=tk.NORMAL)
-                    if verificar_se_ja_enviado(ctx):
-                        btn_enviar.config(text="Reenviar p/ Storage")
-                    else:
-                        btn_enviar.config(text="2. Enviar p/ Storage")
-                else:
-                    btn_processar.pack(side=tk.LEFT, padx=5)
-            else:
-                btn_criar_dir.pack(side=tk.LEFT, padx=5)
-                btn_criar_dir.config(state=tk.NORMAL)
-        
-        # 2. List window
-        list_attrs = ['btn_recriar_dir_list', 'btn_processar_list', 'btn_reprocessar_list', 'btn_abrir_dir_list', 'btn_enviar_list', 'chk_auto_list', 'btn_limpar_extracao_list', 'btn_backup_list']
-        has_list = all(hasattr(janela, attr) for attr in list_attrs)
-        if has_list:
-            try:
-                if janela.btn_recriar_dir_list.winfo_exists():
-                    janela.btn_recriar_dir_list.pack_forget()
-                    janela.btn_processar_list.pack_forget()
-                    janela.btn_reprocessar_list.pack_forget()
-                    janela.btn_abrir_dir_list.pack_forget()
-                    janela.btn_enviar_list.pack_forget()
-                    janela.chk_auto_list.pack_forget()
-                    janela.btn_limpar_extracao_list.pack_forget()
-                    janela.btn_backup_list.pack_forget()
-                    
-                    if hasattr(janela, 'tree_list') and janela.tree_list.winfo_exists():
-                        selected = janela.tree_list.selection()
-                        if len(selected) > 1:
-                            janela.chk_auto_list.pack(side=tk.LEFT, padx=5)
-                            janela.btn_recriar_dir_list.pack(side=tk.LEFT, padx=5)
-                            janela.btn_processar_list.pack(side=tk.LEFT, padx=5)
-                            janela.btn_reprocessar_list.pack(side=tk.LEFT, padx=5)
-                            janela.btn_enviar_list.pack(side=tk.LEFT, padx=5)
-                            janela.btn_enviar_list.config(state=tk.NORMAL)
-                            janela.btn_enviar_list.config(text="2. Enviar p/ Storage")
-                            janela.btn_limpar_extracao_list.pack(side=tk.LEFT, padx=5)
-                            janela.btn_backup_list.pack(side=tk.LEFT, padx=5)
-                        elif len(selected) == 1:
-                            if ctx.caminho_base and os.path.exists(ctx.caminho_base):
-                                janela.chk_auto_list.pack(side=tk.LEFT, padx=5)
-                                janela.btn_recriar_dir_list.pack(side=tk.LEFT, padx=5)
-                                janela.btn_abrir_dir_list.pack(side=tk.LEFT, padx=5)
-                                janela.btn_limpar_extracao_list.pack(side=tk.LEFT, padx=5)
-                                janela.btn_backup_list.pack(side=tk.LEFT, padx=5)
-                                if utils.tentar_restaurar_processamento(ctx):
-                                    janela.btn_reprocessar_list.pack(side=tk.LEFT, padx=5)
-                                    janela.btn_enviar_list.pack(side=tk.LEFT, padx=5)
-                                    janela.btn_enviar_list.config(state=tk.NORMAL)
-                                    if verificar_se_ja_enviado(ctx):
-                                         janela.btn_enviar_list.config(text="Reenviar p/ Storage")
-                                    else:
-                                         janela.btn_enviar_list.config(text="2. Enviar p/ Storage")
-                                else:
-                                    janela.btn_processar_list.pack(side=tk.LEFT, padx=5)
-            except Exception:
-                pass
-    # Substituir label de progresso por Progressbar
-    progress_bar = ttk.Progressbar(frame_botoes, mode='indeterminate')
-    # Checkbox já existente usa auto_enviar BooleanVar; sincronizar com ctx
-    def sync_auto():
-        ctx.auto_enviar = auto_enviar.get()
-    auto_enviar.trace_add('write', lambda *args: sync_auto())
-
-    frame_txt = ttk.Frame(janela)
-    frame_txt.pack(pady=10, padx=20, fill=tk.X)
-    
-    txt_resultado = ScrolledText(frame_txt, wrap=tk.WORD, font=("Courier New", 10), height=5)
-    txt_resultado.pack(fill=tk.X, expand=False)
-    
-    # Configuração de tags para realce de texto
-    txt_resultado.tag_config("sucesso", foreground="green", font=("Courier New", 11, "bold"))
-    txt_resultado.tag_config("erro", foreground="red", font=("Courier New", 11, "bold"))
-    txt_resultado.tag_config("aviso", foreground="#FF8C00", font=("Courier New", 10, "bold"))
-    
-    # Frame para exibir a tabela de resultados com Treeview (Smooth scroll)
-    frame_tree = tk.Frame(janela)
-    # Por padrão, a tabela fica oculta (não empacotada no início)
-    
-    # Treeview nativo do ttk
-    tree_dados = ttk.Treeview(frame_tree, show="headings")
-    
-    # Scrollbars para a Treeview
-    scroll_y = ttk.Scrollbar(frame_tree, orient="vertical", command=tree_dados.yview)
-    scroll_x = ttk.Scrollbar(frame_tree, orient="horizontal", command=tree_dados.xview)
-    tree_dados.configure(yscroll=scroll_y.set, xscroll=scroll_x.set)
-    
-    # Pack Treeview e Scrollbars
-    tree_dados.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-    scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
-    
-    # Opção para exibir ou ocultar a tabela de dados
-    exibir_tabela_var = tk.BooleanVar(value=False)
-    
-    def toggle_tabela(*args):
-        if exibir_tabela_var.get():
-            frame_tree.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
+        if sucesso:
+            self.log(f"\n[SUCESSO] Arquivo enviado com sucesso!\nSalvo em rede: {destino_ou_erro}\n", "success")
+            QMessageBox.information(self, "Upload Concluído", f"Arquivo enviado com sucesso para a rede:\n{destino_ou_erro}")
         else:
-            frame_tree.pack_forget()
+            if destino_ou_erro == "Cancelado":
+                self.log("\n[AVISO] Envio cancelado pelo usuário.\n", "warning")
+            else:
+                self.log(f"\n[ERRO] Falha ao enviar para o Storage:\n{destino_ou_erro}\n", "error")
+                QMessageBox.critical(self, "Erro de Rede", f"Falha ao enviar para o Storage:\n{destino_ou_erro}")
+
+    def cancelar_envio_gui(self):
+        reply = QMessageBox.question(
+            self, 
+            "Confirmar Cancelamento", 
+            "Deseja realmente cancelar o envio para o Storage?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.ctx.cancel_event.set()
+            self.definir_estado_controles(True)
+            self.btn_cancelar_envio.setVisible(False)
+            self.progress_bar.setVisible(False)
+
+    # --- SOBRESCRITA CALLBACK (THREAD-SAFE) ---
+
+    def perguntar_sobrescrever(self, caminho):
+        self.sobrescrever_event.clear()
+        self.sig_perguntar_sobrescrever.emit(caminho)
+        self.sobrescrever_event.wait()
+        return self.sobrescrever_result
+
+    def _on_perguntar_sobrescrever(self, caminho):
+        reply = QMessageBox.question(
+            self, 
+            "Confirmar Sobrescrita", 
+            f"O arquivo já existe no destino:\n{caminho}\n\nDeseja sobrescrevê-lo?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        self.sobrescrever_result = (reply == QMessageBox.StandardButton.Yes)
+        self.sobrescrever_event.set()
+
+    # --- OUTROS CONTROLES ---
+
+    def criar_diretorios(self):
+        if not self.ctx.dados or not self.ctx.protocolo:
+            QMessageBox.critical(self, "Erro", "Não há dados de protocolo para criar os diretórios.")
+            return
             
-    exibir_tabela_var.trace_add('write', toggle_tabela)
+        pasta_raiz = self.config.get('pasta_raiz')
+        if not pasta_raiz or not os.path.isdir(pasta_raiz):
+            QMessageBox.warning(self, "Aviso", "Pasta raiz não configurada ou inválida.\nPor favor, selecione-a agora.")
+            self.abrir_configuracoes()
+            pasta_raiz = self.config.get('pasta_raiz')
+            if not pasta_raiz or not os.path.isdir(pasta_raiz):
+                return
+
+        caminho_base = utils.obter_caminho_base(self.ctx.protocolo, self.ctx.dados, pasta_raiz)
+        if not caminho_base:
+            return
+        
+        if os.path.exists(caminho_base):
+            QMessageBox.information(self, "Aviso", "O diretório para este protocolo já existe.")
+            self.btn_criar_dir.setVisible(False)
+            return
+            
+        pastas_para_criar = ['Extração', 'Fotos', 'Laudo', 'Relatorios', 'Relatorios/Anexo Digital']
+        try:
+            os.makedirs(caminho_base, exist_ok=True)
+            for pasta in pastas_para_criar:
+                os.makedirs(os.path.join(caminho_base, pasta), exist_ok=True)
+            
+            caminho_json = os.path.join(caminho_base, 'Laudo', 'dados_protocolo.json')
+            with open(caminho_json, 'w', encoding='utf-8') as f:
+                json.dump(self.ctx.dados, f, indent=4, ensure_ascii=False)
+            
+            if self.ctx.texto_resultado:
+                caminho_txt = os.path.join(caminho_base, 'Laudo', 'Resumo_Laudo.txt')
+                utils.salvar_resumo_txt(caminho_txt, self.ctx.protocolo, self.ctx.texto_resultado)
+            
+            QMessageBox.information(self, "Sucesso", f"Diretórios criados com sucesso em:\n{caminho_base}")
+            self.ctx.caminho_zip = ""
+            self.ctx.senha = ""
+            self.ctx.hash_diretorio = ""
+            self.atualizar_botoes_gui()
+            os.startfile(caminho_base)
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao criar diretórios: {e}")
+
+    def recriar_diretorios(self):
+        if not self.ctx.dados or not self.ctx.protocolo:
+            QMessageBox.critical(self, "Erro", "Não há dados de protocolo para recriar os diretórios.")
+            return
+            
+        pasta_raiz = self.config.get('pasta_raiz')
+        if not pasta_raiz or not os.path.isdir(pasta_raiz):
+            QMessageBox.warning(self, "Aviso", "Pasta raiz não configurada ou inválida.\nPor favor, selecione-a agora.")
+            self.abrir_configuracoes()
+            pasta_raiz = self.config.get('pasta_raiz')
+            if not pasta_raiz or not os.path.isdir(pasta_raiz):
+                return
+
+        caminho_base = utils.obter_caminho_base(self.ctx.protocolo, self.ctx.dados, pasta_raiz)
+        if not caminho_base:
+            return
+            
+        if os.path.exists(caminho_base):
+            reply = QMessageBox.question(
+                self,
+                "Confirmar Recriação", 
+                f"O diretório já existe em:\n{caminho_base}\n\nTem certeza de que deseja RECRIAR? Todos os arquivos existentes nesta pasta serão apagados permanentemente!",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+            
+            try:
+                shutil.rmtree(caminho_base)
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Falha ao apagar o diretório existente: {e}")
+                return
+                
+        pastas_para_criar = ['Extração', 'Fotos', 'Laudo', 'Relatorios', 'Relatorios/Anexo Digital']
+        try:
+            os.makedirs(caminho_base, exist_ok=True)
+            for pasta in pastas_para_criar:
+                os.makedirs(os.path.join(caminho_base, pasta), exist_ok=True)
+            
+            caminho_json = os.path.join(caminho_base, 'Laudo', 'dados_protocolo.json')
+            with open(caminho_json, 'w', encoding='utf-8') as f:
+                json.dump(self.ctx.dados, f, indent=4, ensure_ascii=False)
+            
+            if self.ctx.texto_resultado:
+                caminho_txt = os.path.join(caminho_base, 'Laudo', 'Resumo_Laudo.txt')
+                utils.salvar_resumo_txt(caminho_txt, self.ctx.protocolo, self.ctx.texto_resultado)
+            
+            QMessageBox.information(self, "Sucesso", f"Diretórios recriados com sucesso em:\n{caminho_base}")
+            self.ctx.caminho_zip = ""
+            self.ctx.senha = ""
+            self.ctx.hash_diretorio = ""
+            self.atualizar_botoes_gui()
+            os.startfile(caminho_base)
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao recriar diretórios: {e}")
+
+    def abrir_pasta_atual(self):
+        if self.ctx.caminho_base and os.path.exists(self.ctx.caminho_base):
+            os.startfile(self.ctx.caminho_base)
+
+    def verificar_se_ja_enviado(self, local_ctx):
+        if not local_ctx.caminho_base or not os.path.exists(local_ctx.caminho_base):
+            return False
+            
+        pasta_anexo = os.path.join(local_ctx.caminho_base, 'Relatorios', 'Anexo Digital')
+        arquivo_info = os.path.join(pasta_anexo, 'INFO.txt')
+        if not os.path.exists(arquivo_info):
+            return False
+            
+        url_storage = None
+        try:
+            with open(arquivo_info, 'r', encoding='utf-8') as f:
+                for linha in f:
+                    linha = linha.strip()
+                    if linha.startswith("URL Storage:"):
+                        url_storage = linha.split(":", 1)[1].strip()
+                        break
+        except Exception:
+            return False
+            
+        if not url_storage or "/laudos/" not in url_storage:
+            return False
+            
+        caminho_relativo = url_storage.split("/laudos/", 1)[1]
+        partes = caminho_relativo.split('/')
+        
+        storage_base = self.config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos')
+        destino_arquivo = os.path.join(storage_base, *partes)
+        
+        try:
+            return os.path.exists(destino_arquivo)
+        except Exception:
+            return False
+
+    def atualizar_botoes_gui(self):
+        # Esconde todos primeiro
+        self.btn_criar_dir.setVisible(False)
+        self.btn_recriar_dir.setVisible(False)
+        self.btn_processar.setVisible(False)
+        self.btn_reprocessar.setVisible(False)
+        self.btn_abrir_dir.setVisible(False)
+        self.btn_enviar.setVisible(False)
+        self.chk_auto.setVisible(False)
+
+        if self.ctx.caminho_base:
+            self.chk_auto.setVisible(True)
+            if os.path.exists(self.ctx.caminho_base):
+                self.btn_recriar_dir.setVisible(True)
+                self.btn_abrir_dir.setVisible(True)
+                if utils.tentar_restaurar_processamento(self.ctx):
+                    self.btn_reprocessar.setVisible(True)
+                    self.btn_enviar.setVisible(True)
+                    self.btn_enviar.setEnabled(True)
+                    if self.verificar_se_ja_enviado(self.ctx):
+                        self.btn_enviar.setText("Reenviar p/ Storage")
+                    else:
+                        self.btn_enviar.setText("2. Enviar p/ Storage")
+                else:
+                    self.btn_processar.setVisible(True)
+            else:
+                self.btn_criar_dir.setVisible(True)
+                self.btn_criar_dir.setEnabled(True)
+
+    def definir_estado_controles(self, ativo):
+        self.entry_protocolo.setEnabled(ativo)
+        self.btn_consultar.setEnabled(ativo)
+        self.btn_criar_dir.setEnabled(ativo)
+        self.btn_recriar_dir.setEnabled(ativo)
+        self.btn_processar.setEnabled(ativo)
+        self.btn_reprocessar.setEnabled(ativo)
+        self.btn_enviar.setEnabled(ativo)
+        self.chk_auto.setEnabled(ativo)
+
+    def abrir_configuracoes(self):
+        dlg = SettingsDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.config = utils.carregar_config()
+
+    def listar_diretorios(self):
+        dlg = ProcessesDialog(self.ctx, self.config, self)
+        dlg.exec()
+        # Atualiza botões da janela principal quando fechar a lista
+        self.atualizar_botoes_gui()
+
+
+# ---------------------------------------------------------------------------
+# Entry Point
+# ---------------------------------------------------------------------------
+
+def iniciar_interface():
+    app = QApplication(sys.argv)
+    app.setStyleSheet(STYLING)
     
-    chk_exibir_tabela = ttk.Checkbutton(frame_top, text="Exibir Tabela de Dados", variable=exibir_tabela_var)
-    chk_exibir_tabela.pack(side=tk.LEFT, padx=15)
+    window = MainWindow()
+    window.show()
     
-    entry_protocolo.focus()
-    janela.mainloop()
+    app.exec()
