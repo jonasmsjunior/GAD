@@ -16,15 +16,15 @@ try:
     from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                     QLabel, QLineEdit, QPushButton, QCheckBox, QTableWidget, 
                                     QTableWidgetItem, QTextEdit, QProgressBar, QDialog, QFileDialog, 
-                                    QHeaderView, QMessageBox, QMenu)
-    from PySide6.QtGui import QFont, QColor, QTextCursor, QAction
+                                    QHeaderView, QMessageBox, QMenu, QComboBox)
+    from PySide6.QtGui import QFont, QColor, QTextCursor, QAction, QPixmap
 except ImportError:
     from PyQt6.QtCore import QThread, pyqtSignal as Signal, Qt, QEventLoop, QTimer
     from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                     QLabel, QLineEdit, QPushButton, QCheckBox, QTableWidget, 
                                     QTableWidgetItem, QTextEdit, QProgressBar, QDialog, QFileDialog, 
                                     QHeaderView, QMessageBox, QMenu)
-    from PyQt6.QtGui import QFont, QColor, QTextCursor, QAction
+    from PyQt6.QtGui import QFont, QColor, QTextCursor, QAction, QPixmap
 
 # ---------------------------------------------------------------------------
 # QSS Stylesheet - Premium Dark Theme
@@ -73,11 +73,18 @@ QPushButton:hover {
 QPushButton:pressed {
     background-color: #121214;
 }
-QPushButton:disabled {
-    background-color: #1c1c1e;
-    color: #7c7c8a;
-    border-color: #202024;
-}
+    QMenu, QMenuBar {
+        background-color: #2a2a2a;
+        color: #ffffff;
+        font-size: 12px;
+    }
+    QMenu::item {
+        padding: 8px 24px;
+    }
+    QMenu::item:selected {
+        background-color: #444444;
+        color: #ffffff;
+    }
 
 /* Accent Buttons */
 QPushButton#btn_consultar {
@@ -199,6 +206,48 @@ QCheckBox::indicator:hover {
 QCheckBox::indicator:checked {
     background-color: #00ADB5;
     border: 4px solid #202024;
+}
+"""
+
+# Light mode stylesheet (minimal premium)
+LIGHT_STYLING = """
+QMainWindow, QDialog {
+    background-color: #f5f5f5;
+    color: #212121;
+}
+QWidget {
+    color: #212121;
+    font-family: "Segoe UI", "Segoe UI Semibold", sans-serif;
+    font-size: 10pt;
+}
+QLineEdit {
+    background-color: #ffffff;
+    border: 1px solid #c0c0c0;
+    color: #212121;
+}
+QPushButton {
+    background-color: #e0e0e0;
+    border: 1px solid #b0b0b0;
+    color: #212121;
+}
+QPushButton:hover {
+    background-color: #d0d0d0;
+}
+QMenu, QMenuBar {
+    background-color: #e0e0e0;
+    color: #212121;
+    font-size: 14px;
+}
+QMenu::item:selected {
+    background-color: #c0c0c0;
+}
+QTableWidget {
+    background-color: #ffffff;
+    alternate-background-color: #f0f0f0;
+}
+QHeaderView::section {
+    background-color: #e0e0e0;
+    color: #212121;
 }
 """
 
@@ -584,7 +633,7 @@ class BatchWorker(QThread):
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Configurações do GAD")
+        self.setWindowTitle("Sistema do GAD")
         self.setMinimumWidth(550)
         self.init_ui()
 
@@ -618,10 +667,16 @@ class SettingsDialog(QDialog):
         h_layout2.addWidget(self.btn_buscar_backup)
         layout.addLayout(h_layout2)
 
+        # Tema (Dark / Light)
+        layout.addWidget(QLabel("<b>Tema:</b>"))
+        self.combo_tema = QComboBox()
+        self.combo_tema.addItems(["Dark", "Light"])
+        layout.addWidget(self.combo_tema)
+
         # Buttons
         h_buttons = QHBoxLayout()
         h_buttons.addStretch()
-        self.btn_salvar = QPushButton("Salvar Configurações")
+        self.btn_salvar = QPushButton("Salvar Sistema")
         self.btn_salvar.setObjectName("btn_consultar") # cyan accent
         self.btn_salvar.clicked.connect(self.salvar)
         self.btn_cancelar = QPushButton("Cancelar")
@@ -632,13 +687,14 @@ class SettingsDialog(QDialog):
         layout.addSpacing(10)
         layout.addLayout(h_buttons)
 
-        self.carregar_configuracoes()
+        self.carregar_configuracoes()  # permanece, método mantém nome
 
     def carregar_configuracoes(self):
         config = utils.carregar_config()
         self.entry_raiz.setText(config.get('pasta_raiz', ''))
         self.entry_storage.setText(config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos'))
         self.entry_backup.setText(config.get('destino_backup', ''))
+        self.combo_tema.setCurrentText(config.get('tema', 'Dark'))
 
     def buscar_raiz(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Selecionar Pasta Raiz")
@@ -654,13 +710,14 @@ class SettingsDialog(QDialog):
         config = {
             'pasta_raiz': self.entry_raiz.text().strip(),
             'destino_storage': self.entry_storage.text().strip(),
-            'destino_backup': self.entry_backup.text().strip()
+            'destino_backup': self.entry_backup.text().strip(),
+            'tema': self.combo_tema.currentText()
         }
         if utils.salvar_config(config):
-            QMessageBox.information(self, "Sucesso", "Configurações salvas com sucesso!")
+            QMessageBox.information(self, "Sucesso", "Sistema salvo com sucesso!")
             self.accept()
         else:
-            QMessageBox.critical(self, "Erro", "Não foi possível salvar as configurações.")
+            QMessageBox.critical(self, "Erro", "Não foi possível salvar o sistema.")
 
 
 # ---------------------------------------------------------------------------
@@ -956,7 +1013,7 @@ class ProcessesDialog(QDialog):
         destino_storage = self.config.get('destino_storage')
         destino_backup = self.config.get('destino_backup')
         
-        self.bloqueiar_controles(True)
+        self.bloquear_controles(True)
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         self.btn_cancelar.setVisible(True)
@@ -1139,9 +1196,9 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         # Menu Bar
         menu_bar = self.menuBar()
-        menu_config = menu_bar.addMenu("Configurações")
+        menu_config = menu_bar.addMenu("Sistema")
         
-        action_config = QAction("Configurações...", self)
+        action_config = QAction("Sistema...", self)
         action_config.triggered.connect(self.abrir_configuracoes)
         
         action_lista = QAction("Processos locais...", self)
@@ -1165,6 +1222,16 @@ class MainWindow(QMainWindow):
         self.lbl_titulo.setObjectName("lbl_titulo")
         self.lbl_titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.lbl_titulo)
+        # Logo Image
+        self.lbl_logo = QLabel()
+        logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            # Optionally scale the pixmap to a reasonable size
+            pixmap = pixmap.scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.lbl_logo.setPixmap(pixmap)
+            self.lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.lbl_logo)
 
         # Top area (Query Protocol)
         top_layout = QHBoxLayout()
@@ -1708,7 +1775,13 @@ class MainWindow(QMainWindow):
 
 def iniciar_interface():
     app = QApplication(sys.argv)
-    app.setStyleSheet(STYLING)
+    # Carrega tema salvo (Dark padrão)
+    cfg = utils.carregar_config()
+    tema = cfg.get('tema', 'Dark')
+    if tema == 'Light':
+        app.setStyleSheet(LIGHT_STYLING)
+    else:
+        app.setStyleSheet(STYLING)
     
     window = MainWindow()
     window.show()

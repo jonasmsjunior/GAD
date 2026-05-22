@@ -1,14 +1,32 @@
 import os
+import sys
+from dotenv import load_dotenv
 import requests
 import json
 from tabulate import tabulate
-from dotenv import load_dotenv
 
+# Carrega variáveis de ambiente do .env, suportando execução como script e como executável PyInstaller
+if getattr(sys, 'frozen', False):
+    # Executável empacotado
+    base_path = sys._MEIPASS
+else:
+    # Execução direta (python)
+    base_path = os.path.abspath(os.path.dirname(__file__))
+
+env_path = os.path.join(base_path, '.env')
+load_dotenv(env_path)
 # Carrega variáveis de ambiente do .env
-load_dotenv()
+
 
 TOKEN_API_GALILEU = os.getenv('TOKEN_API_GALILEU')
 ENDERECO_GALILEU = os.getenv('ENDERECO_GALILEU', 'https://galileu.ssp.to.gov.br/galileiWebService')
+
+# Verifica se o token está presente; caso contrário, exibe mensagem de erro amigável
+if not TOKEN_API_GALILEU:
+    raise RuntimeError(
+        "TOKEN_API_GALILEU não encontrado. Crie um arquivo .env contendo TOKEN_API_GALILEU=... "
+        "ou defina a variável de ambiente antes de executar o programa."
+    )
 
 def consultar_protocolo(protocolo):
     url = f"{ENDERECO_GALILEU}/procedimentopericial/{protocolo}/"
