@@ -403,6 +403,7 @@ class SizeCalculatorWorker(QThread):
 
 class BatchWorker(QThread):
     progress_signal = Signal(int, str) # pct, description
+    log_signal = Signal(str, str)      # message, style
     finished_signal = Signal(int, int) # sucessos, erros
     
     def __init__(self, task_type, selected_folders, pasta_raiz, destino_storage, destino_backup, auto_enviar, parent_dlg):
@@ -447,17 +448,23 @@ class BatchWorker(QThread):
             self.finished_signal.emit(0, 0)
             return
 
+        self.log_signal.emit(f"Iniciando execução em lote de {total} processo(s)...", "info")
+
         for i, nome_pasta in enumerate(self.selected_folders):
             if self.cancel_event.is_set():
+                self.log_signal.emit("\n[AVISO] Operação em lote cancelada pelo usuário.", "warning")
                 break
 
             pct_base = int((i / total) * 100)
+            self.log_signal.emit(f"\n========================================\n[{i+1}/{total}] PROCESSO: {nome_pasta}\n========================================", "info")
             
             # --- TAREFA: LIMPAR EXTRAÇÃO ---
             if self.task_type == 'clear':
                 self.progress_signal.emit(pct_base, f"[{i+1}/{total}] {nome_pasta} - Limpando extração...")
+                self.log_signal.emit("-> Limpando pasta de extração...", "info")
                 local_ctx = self.obter_contexto_pasta(nome_pasta)
                 if not local_ctx or not local_ctx.caminho_base:
+                    self.log_signal.emit("   └─ [ERRO] Contexto da pasta inválido.", "error")
                     erros += 1
                     continue
                 caminho_extracao = os.path.join(local_ctx.caminho_base, 'Extração')
@@ -465,28 +472,37 @@ class BatchWorker(QThread):
                     if os.path.exists(caminho_extracao):
                         shutil.rmtree(caminho_extracao)
                     os.makedirs(caminho_extracao, exist_ok=True)
+                    self.log_signal.emit("   └─ Limpeza concluída com sucesso! [OK]", "success")
                     sucessos += 1
-                except Exception:
+                except Exception as e:
+                    self.log_signal.emit(f"   └─ [ERRO] Falha ao limpar: {e}", "error")
                     erros += 1
 
             # --- TAREFA: RECOMPILAR / RECOMPACTAR E BACKUP ---
             elif self.task_type == 'backup':
+                self.log_signal.emit("-> Executando Backup & Limpeza...", "info")
                 local_ctx = self.obter_contexto_pasta(nome_pasta)
                 if not local_ctx or not local_ctx.caminho_base:
+                    self.log_signal.emit("   └─ [ERRO] Contexto da pasta inválido.", "error")
                     erros += 1
                     continue
                 caminho_zip_local = os.path.join(self.pasta_raiz, f"{nome_pasta}.zip")
                 caminho_backup_final = os.path.join(self.destino_backup, f"{nome_pasta}.zip")
                 
                 if os.path.exists(caminho_backup_final):
+                    self.log_signal.emit(f"   [!] O arquivo '{nome_pasta}.zip' já existe no backup. Aguardando confirmação...", "warning")
                     # Solicita resposta da thread principal
                     sobrescrever = self.parent_dlg.perguntar_sobrescrever_backup_lote(nome_pasta)
                     if not sobrescrever:
+                        self.log_signal.emit("   [!] Sobrescrita negada. Pulando este processo.", "warning")
                         pulados += 1
                         continue
+                    else:
+                        self.log_signal.emit("   [!] Sobrescrita confirmada.", "info")
                 
                 try:
                     self.progress_signal.emit(int((i * 100 + 20) / total), f"[{i+1}/{total}] {nome_pasta} - Compactando pasta...")
+                    self.log_signal.emit("   -> Criando arquivo ZIP local...", "info")
                     shutil.make_archive(
                         base_name=os.path.join(self.pasta_raiz, nome_pasta),
                         format='zip',
@@ -495,18 +511,23 @@ class BatchWorker(QThread):
                     )
                     
                     self.progress_signal.emit(int((i * 100 + 40) / total), f"[{i+1}/{total}] {nome_pasta} - Copiando p/ Backup...")
+                    self.log_signal.emit("   -> Copiando ZIP para o destino de backup...", "info")
                     shutil.copy2(caminho_zip_local, caminho_backup_final)
                     
                     self.progress_signal.emit(int((i * 100 + 60) / total), f"[{i+1}/{total}] {nome_pasta} - Verificando integridade...")
+                    self.log_signal.emit("   -> Verificando integridade do backup...", "info")
                     if os.path.exists(caminho_backup_final) and os.path.getsize(caminho_backup_final) == os.path.getsize(caminho_zip_local):
                         self.progress_signal.emit(int((i * 100 + 80) / total), f"[{i+1}/{total}] {nome_pasta} - Removendo originais...")
+                        self.log_signal.emit("   -> Removendo pasta local original e ZIP temporário...", "info")
                         shutil.rmtree(local_ctx.caminho_base)
                         if os.path.exists(caminho_zip_local):
                             os.remove(caminho_zip_local)
+                        self.log_signal.emit("   └─ Backup e Limpeza concluídos com sucesso! [OK]", "success")
                         sucessos += 1
                     else:
-                        raise Exception("Erro de validação no backup")
-                except Exception:
+                        raise Exception("Erro de validação de tamanho no backup")
+                except Exception as e:
+                    self.log_signal.emit(f"   └─ [ERRO] Falha no Backup: {e}", "error")
                     try:
                         if os.path.exists(caminho_zip_local):
                             os.remove(caminho_zip_local)
@@ -517,8 +538,10 @@ class BatchWorker(QThread):
             # --- TAREFA: RE-CRIAR DIRETÓRIOS ---
             elif self.task_type == 'recreate':
                 self.progress_signal.emit(pct_base, f"[{i+1}/{total}] {nome_pasta} - Recriando diretórios...")
+                self.log_signal.emit("-> Recriando estrutura de diretórios GAD...", "info")
                 local_ctx = self.obter_contexto_pasta(nome_pasta)
                 if not local_ctx:
+                    self.log_signal.emit("   └─ [ERRO] Não foi possível obter o contexto da pasta.", "error")
                     erros += 1
                     continue
                 resumo_txt = ""
@@ -540,14 +563,17 @@ class BatchWorker(QThread):
                         json.dump(local_ctx.dados, f, indent=4, ensure_ascii=False)
                     if resumo_txt:
                         utils.salvar_resumo_txt(caminho_txt, local_ctx.protocolo, resumo_txt)
+                    self.log_signal.emit("   └─ Diretórios recriados com sucesso! [OK]", "success")
                     sucessos += 1
-                except Exception:
+                except Exception as e:
+                    self.log_signal.emit(f"   └─ [ERRO] Falha ao recriar: {e}", "error")
                     erros += 1
 
             # --- TAREFA: PROCESSAR ANEXOS ---
             elif self.task_type == 'process':
                 local_ctx = self.obter_contexto_pasta(nome_pasta)
                 if not local_ctx:
+                    self.log_signal.emit("   └─ [ERRO] Não foi possível carregar o contexto da pasta.", "error")
                     erros += 1
                     continue
 
@@ -569,6 +595,7 @@ class BatchWorker(QThread):
                             num_laudo = str(numero_completo)
                 
                 if not laudo_criado or not num_laudo:
+                    self.log_signal.emit("   └─ [ERRO] Nenhum laudo associado no Galileu para este protocolo.", "error")
                     erros += 1
                     continue
 
@@ -577,33 +604,44 @@ class BatchWorker(QThread):
                 local_ctx.auto_enviar = self.auto_enviar
                 local_ctx.cancel_event = self.cancel_event
 
+                self.log_signal.emit(f"-> Processando anexos para o Laudo: LP_{local_ctx.ano}.{local_ctx.numero_laudo}", "info")
+
                 def local_cb(pct, desc):
                     prog_pct = int((i * 100 + pct) / total)
                     self.progress_signal.emit(prog_pct, f"[{i+1}/{total}] {nome_pasta} - {desc}")
+                    self.log_signal.emit(f"   -> {desc} ...", "info")
 
                 try:
                     services.processar_anexos(local_ctx, callback_progresso=local_cb)
+                    self.log_signal.emit("   └─ Concluído com sucesso! [OK]", "success")
                     sucessos += 1
+                    
                     if self.auto_enviar:
                         self.progress_signal.emit(int(((i + 0.5) * 100) / total), f"[{i+1}/{total}] {nome_pasta} - Enviando Storage...")
-                        services.enviar_ao_storage(
+                        self.log_signal.emit("   -> Enviando arquivo ZIP ao Storage...", "info")
+                        destino = services.enviar_ao_storage(
                             local_ctx, 
                             confirmar_sobrescrever=self.parent_dlg.perguntar_sobrescrever_storage_lote, 
                             cancel_event=self.cancel_event
                         )
-                except Exception:
+                        self.log_signal.emit(f"   └─ Enviado ao Storage com sucesso: {destino} [OK]", "success")
+                except Exception as e:
+                    self.log_signal.emit(f"   └─ [ERRO] Falha no processamento/envio: {e}", "error")
                     erros += 1
 
             # --- TAREFA: ENVIAR PARA STORAGE ---
             elif self.task_type == 'upload':
                 self.progress_signal.emit(pct_base, f"[{i+1}/{total}] {nome_pasta} - Enviando Storage...")
+                self.log_signal.emit("-> Iniciando upload ao Storage...", "info")
                 local_ctx = self.obter_contexto_pasta(nome_pasta)
                 if not local_ctx:
+                    self.log_signal.emit("   └─ [ERRO] Não foi possível obter o contexto da pasta.", "error")
                     erros += 1
                     continue
                 if not local_ctx.caminho_zip or not os.path.exists(local_ctx.caminho_zip):
                     utils.tentar_restaurar_processamento(local_ctx)
                     if not local_ctx.caminho_zip or not os.path.exists(local_ctx.caminho_zip):
+                        self.log_signal.emit("   └─ [ERRO] Arquivo ZIP do anexo digital não foi encontrado localmente. Processe primeiro.", "error")
                         erros += 1
                         continue
 
@@ -625,6 +663,7 @@ class BatchWorker(QThread):
                             num_laudo = str(numero_completo)
                 
                 if not num_laudo:
+                    self.log_signal.emit("   └─ [ERRO] Nenhum laudo associado no Galileu.", "error")
                     erros += 1
                     continue
                 
@@ -632,16 +671,21 @@ class BatchWorker(QThread):
                 local_ctx.ano = ano_laudo if ano_laudo else datetime.now().year
                 local_ctx.cancel_event = self.cancel_event
 
+                self.log_signal.emit(f"   -> Copiando '{os.path.basename(local_ctx.caminho_zip)}' para a rede...", "info")
+
                 try:
-                    services.enviar_ao_storage(
+                    destino = services.enviar_ao_storage(
                         local_ctx, 
                         confirmar_sobrescrever=self.parent_dlg.perguntar_sobrescrever_storage_lote, 
                         cancel_event=self.cancel_event
                     )
+                    self.log_signal.emit(f"   └─ Upload concluído com sucesso: {destino} [OK]", "success")
                     sucessos += 1
-                except Exception:
+                except Exception as e:
+                    self.log_signal.emit(f"   └─ [ERRO] Falha no upload: {e}", "error")
                     erros += 1
 
+        self.log_signal.emit(f"\n>>> EXECUÇÃO FINALIZADA. Sucessos: {sucessos}, Erros: {erros}.", "success" if erros == 0 else "warning")
         self.finished_signal.emit(sucessos, erros)
 
 
@@ -820,12 +864,26 @@ class ProcessesDialog(QDialog):
 
         # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderLabels(["Nome da Pasta", "Tamanho Ocupado"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["", "Nome da Pasta", "Tamanho Ocupado", "Situação"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.itemSelectionChanged.connect(self.ao_selecionar_pasta)
+        self.table.itemChanged.connect(self.ao_alterar_item)
         layout.addWidget(self.table)
+
+        # Seleção em lote
+        h_selecao = QHBoxLayout()
+        self.btn_selecionar_todos = QPushButton("Selecionar Todos")
+        self.btn_selecionar_todos.clicked.connect(self.selecionar_todos)
+        self.btn_desmarcar_todos = QPushButton("Limpar Seleção")
+        self.btn_desmarcar_todos.clicked.connect(self.desmarcar_todos)
+        h_selecao.addWidget(self.btn_selecionar_todos)
+        h_selecao.addWidget(self.btn_desmarcar_todos)
+        h_selecao.addStretch()
+        layout.addLayout(h_selecao)
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -878,22 +936,102 @@ class ProcessesDialog(QDialog):
 
         layout.addLayout(self.frame_acoes)
 
+        # Console Log para Lote
+        self.txt_console = QTextEdit()
+        self.txt_console.setReadOnly(True)
+        self.txt_console.setPlaceholderText("Logs da execução em lote serão exibidos aqui...")
+        self.txt_console.setMinimumHeight(150)
+        self.txt_console.setMaximumHeight(220)
+        layout.addWidget(self.txt_console)
+
         self.atualizar_tamanhos_tabela()
         self.atualizar_botoes()
+
+    def ao_alterar_item(self, item):
+        if item.column() == 0:
+            self.atualizar_botoes()
+
+    def selecionar_todos(self):
+        self.table.itemChanged.disconnect(self.ao_alterar_item)
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            if item:
+                item.setCheckState(Qt.CheckState.Checked)
+        self.table.itemChanged.connect(self.ao_alterar_item)
+        self.atualizar_botoes()
+
+    def desmarcar_todos(self):
+        self.table.itemChanged.disconnect(self.ao_alterar_item)
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            if item:
+                item.setCheckState(Qt.CheckState.Unchecked)
+        self.table.itemChanged.connect(self.ao_alterar_item)
+        self.atualizar_botoes()
+
+    def log_lote(self, text, style="info"):
+        cursor = self.txt_console.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        
+        color = "#e1e1e6" # default
+        font_weight = "normal"
+        if style == "success":
+            color = "#04D361"
+            font_weight = "bold"
+        elif style == "error":
+            color = "#E23E3E"
+            font_weight = "bold"
+        elif style == "warning":
+            color = "#FF8C00"
+            font_weight = "bold"
+            
+        html = f'<span style="color: {color}; font-weight: {font_weight};">{text}</span>'
+        cursor.insertHtml(html)
+        cursor.insertText("\n")
+        self.txt_console.setTextCursor(cursor)
+        self.txt_console.ensureCursorVisible()
 
     def popular_linha_tabela(self, nome_pasta, tamanho_formatado):
         row = self.table.rowCount()
         self.table.insertRow(row)
         
+        self.table.itemChanged.disconnect(self.ao_alterar_item)
+        
+        item_check = QTableWidgetItem()
+        item_check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        item_check.setCheckState(Qt.CheckState.Unchecked)
+        self.table.setItem(row, 0, item_check)
+        
         item_nome = QTableWidgetItem(nome_pasta)
         item_nome.setFlags(item_nome.flags() ^ Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(row, 1, item_nome)
         
         item_tam = QTableWidgetItem(tamanho_formatado)
         item_tam.setFlags(item_tam.flags() ^ Qt.ItemFlag.ItemIsEditable)
         item_tam.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.table.setItem(row, 2, item_tam)
         
-        self.table.setItem(row, 0, item_nome)
-        self.table.setItem(row, 1, item_tam)
+        local_ctx = self.obter_contexto_pasta(nome_pasta)
+        situacao = "Não Processado"
+        if local_ctx:
+            processado = utils.tentar_restaurar_processamento(local_ctx)
+            if processado:
+                if self.verificar_se_ja_enviado(local_ctx):
+                    situacao = "Enviado"
+                else:
+                    situacao = "Processado"
+        
+        item_sit = QTableWidgetItem(situacao)
+        item_sit.setFlags(item_sit.flags() ^ Qt.ItemFlag.ItemIsEditable)
+        if situacao == "Enviado":
+            item_sit.setForeground(QColor("#04D361"))
+        elif situacao == "Processado":
+            item_sit.setForeground(QColor("#9B59B6"))
+        else:
+            item_sit.setForeground(QColor("#FF8C00"))
+        self.table.setItem(row, 3, item_sit)
+        
+        self.table.itemChanged.connect(self.ao_alterar_item)
 
     def atualizar_animacao_status(self):
         if not self.base_status_text:
@@ -957,7 +1095,7 @@ class ProcessesDialog(QDialog):
         
         # O primeiro item selecionado
         row = selected_items[0].row()
-        nome_pasta = self.table.item(row, 0).text()
+        nome_pasta = self.table.item(row, 1).text()
         
         pasta_raiz = self.config.get('pasta_raiz')
         caminho_pasta = os.path.join(pasta_raiz, nome_pasta)
@@ -992,13 +1130,11 @@ class ProcessesDialog(QDialog):
         self.atualizar_botoes()
 
     def obter_pastas_selecionadas(self):
-        selected_rows = set()
-        for idx in self.table.selectedIndexes():
-            selected_rows.add(idx.row())
-        
         folders = []
-        for r in selected_rows:
-            folders.append(self.table.item(r, 0).text())
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            if item and item.checkState() == Qt.CheckState.Checked:
+                folders.append(self.table.item(r, 1).text())
         return folders
 
     def verificar_se_ja_enviado(self, local_ctx):
@@ -1082,6 +1218,8 @@ class ProcessesDialog(QDialog):
         self.btn_backup.setEnabled(state)
         self.chk_auto.setEnabled(state)
         self.table.setEnabled(state)
+        self.btn_selecionar_todos.setEnabled(state)
+        self.btn_desmarcar_todos.setEnabled(state)
 
     def iniciar_execucao_lote(self, task_type, selected_folders):
         pasta_raiz = self.config.get('pasta_raiz')
@@ -1092,6 +1230,8 @@ class ProcessesDialog(QDialog):
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         self.btn_cancelar.setVisible(True)
+
+        self.txt_console.clear()
 
         self.base_status_text = "Iniciando execução em lote..."
         self.lbl_status.setText(self.base_status_text)
@@ -1107,6 +1247,7 @@ class ProcessesDialog(QDialog):
             self
         )
         self.batch_worker.progress_signal.connect(self.atualizar_progresso_lote)
+        self.batch_worker.log_signal.connect(self.log_lote)
         self.batch_worker.finished_signal.connect(self.finalizar_execucao_lote)
         self.batch_worker.start()
 
@@ -1124,7 +1265,7 @@ class ProcessesDialog(QDialog):
         self.loading_timer.stop()
         self.progress_bar.setVisible(False)
         self.btn_cancelar.setVisible(False)
-        self.bloqueiar_controles(False)
+        self.bloquear_controles(False)
         
         self.lbl_status.setText(f"Execução concluída. Sucessos: {sucessos}, Erros: {erros}.")
         
@@ -1151,7 +1292,7 @@ class ProcessesDialog(QDialog):
                 self.lbl_status.setText("Execução cancelada pelo usuário.")
                 self.progress_bar.setVisible(False)
                 self.btn_cancelar.setVisible(False)
-                self.bloqueiar_controles(False)
+                self.bloquear_controles(False)
 
     def perguntar_sobrescrever_storage_lote(self, caminho):
         self.sig_perguntar_sobrescrever_storage.emit(caminho)
