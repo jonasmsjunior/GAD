@@ -17,14 +17,20 @@ try:
                                     QLabel, QLineEdit, QPushButton, QCheckBox, QTableWidget, 
                                     QTableWidgetItem, QTextEdit, QProgressBar, QDialog, QFileDialog, 
                                     QHeaderView, QMessageBox, QMenu, QComboBox)
-    from PySide6.QtGui import QFont, QColor, QTextCursor, QAction, QPixmap
+    from PySide6.QtGui import QFont, QColor, QTextCursor, QAction, QPixmap, QIcon
 except ImportError:
     from PyQt6.QtCore import QThread, pyqtSignal as Signal, Qt, QEventLoop, QTimer
     from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                     QLabel, QLineEdit, QPushButton, QCheckBox, QTableWidget, 
                                     QTableWidgetItem, QTextEdit, QProgressBar, QDialog, QFileDialog, 
                                     QHeaderView, QMessageBox, QMenu)
-    from PyQt6.QtGui import QFont, QColor, QTextCursor, QAction, QPixmap
+    from PyQt6.QtGui import QFont, QColor, QTextCursor, QAction, QPixmap, QIcon
+
+def obter_caminho_recurso(caminho_relativo):
+    """ Retorna o caminho absoluto para o recurso, compatível com PyInstaller e modo de desenvolvimento """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, caminho_relativo)
+    return os.path.join(os.path.dirname(__file__), caminho_relativo)
 
 # ---------------------------------------------------------------------------
 # QSS Stylesheet - Premium Dark Theme
@@ -280,6 +286,7 @@ class ProcessWorker(QThread):
         self.ctx = ctx
         self.auto_enviar = auto_enviar
         self.parent_window = parent_window
+        self.ultima_etapa = None
 
     def progresso_callback(self, pct, desc):
         etapa_str = ""
@@ -292,13 +299,24 @@ class ProcessWorker(QThread):
         elif pct == 100:
             etapa_str = "[Etapa 4/4] "
         self.progress_signal.emit(pct, f"{etapa_str}{desc}")
-        self.log_signal.emit(f"-> {etapa_str}{desc} ... [OK]", "info")
+        
+        # Se havia uma etapa anterior sendo processada, finaliza com OK
+        if self.ultima_etapa:
+            self.log_signal.emit(f"   └─ Concluído com sucesso! [OK]", "success")
+            
+        self.log_signal.emit(f"-> {etapa_str}{desc} ...", "info")
+        self.ultima_etapa = desc
 
     def run(self):
         try:
             self.log_signal.emit("Iniciando processamento de anexos...\n", "info")
             services.processar_anexos(self.ctx, callback_progresso=self.progresso_callback)
             
+            # Conclui a última etapa do processamento antes de prosseguir
+            if self.ultima_etapa:
+                self.log_signal.emit(f"   └─ Concluído com sucesso! [OK]", "success")
+                self.ultima_etapa = None
+                
             if self.auto_enviar:
                 self.progress_signal.emit(100, "Copiando arquivo para a rede...")
                 self.log_signal.emit("-> [Envio] Copiando arquivo para a rede ...", "info")
@@ -311,6 +329,7 @@ class ProcessWorker(QThread):
                 )
                 
                 if not (self.ctx.cancel_event and self.ctx.cancel_event.is_set()):
+                    self.log_signal.emit(f"   └─ Concluído com sucesso! [OK]", "success")
                     self.log_signal.emit(f"\n[SUCESSO] Processamento e envio concluídos!\nSalvo em rede: {destino}\n", "success")
                     self.finished_signal.emit(True, destino)
                 else:
@@ -667,6 +686,20 @@ class SettingsDialog(QDialog):
         h_layout2.addWidget(self.btn_buscar_backup)
         layout.addLayout(h_layout2)
 
+        # Tipos de Hash
+        layout.addWidget(QLabel("<b>Tipos de Hash a Calcular:</b>"))
+        h_layout_hashes = QHBoxLayout()
+        self.chk_md5 = QCheckBox("MD5")
+        self.chk_sha1 = QCheckBox("SHA-1")
+        self.chk_sha256 = QCheckBox("SHA-256")
+        self.chk_sha512 = QCheckBox("SHA-512")
+        h_layout_hashes.addWidget(self.chk_md5)
+        h_layout_hashes.addWidget(self.chk_sha1)
+        h_layout_hashes.addWidget(self.chk_sha256)
+        h_layout_hashes.addWidget(self.chk_sha512)
+        h_layout_hashes.addStretch()
+        layout.addLayout(h_layout_hashes)
+
         # Tema (Dark / Light)
         layout.addWidget(QLabel("<b>Tema:</b>"))
         self.combo_tema = QComboBox()
@@ -695,6 +728,12 @@ class SettingsDialog(QDialog):
         self.entry_storage.setText(config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos'))
         self.entry_backup.setText(config.get('destino_backup', ''))
         self.combo_tema.setCurrentText(config.get('tema', 'Dark'))
+        
+        tipos_hash = config.get('tipos_hash', ["SHA-256"])
+        self.chk_md5.setChecked("MD5" in tipos_hash)
+        self.chk_sha1.setChecked("SHA-1" in tipos_hash)
+        self.chk_sha256.setChecked("SHA-256" in tipos_hash)
+        self.chk_sha512.setChecked("SHA-512" in tipos_hash)
 
     def buscar_raiz(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Selecionar Pasta Raiz")
@@ -707,11 +746,26 @@ class SettingsDialog(QDialog):
             self.entry_backup.setText(dir_path)
 
     def salvar(self):
+        tipos_hash = []
+        if self.chk_md5.isChecked():
+            tipos_hash.append("MD5")
+        if self.chk_sha1.isChecked():
+            tipos_hash.append("SHA-1")
+        if self.chk_sha256.isChecked():
+            tipos_hash.append("SHA-256")
+        if self.chk_sha512.isChecked():
+            tipos_hash.append("SHA-512")
+            
+        if not tipos_hash:
+            QMessageBox.warning(self, "Aviso", "Por favor, selecione ao menos um tipo de Hash a ser calculado.")
+            return
+
         config = {
             'pasta_raiz': self.entry_raiz.text().strip(),
             'destino_storage': self.entry_storage.text().strip(),
             'destino_backup': self.entry_backup.text().strip(),
-            'tema': self.combo_tema.currentText()
+            'tema': self.combo_tema.currentText(),
+            'tipos_hash': tipos_hash
         }
         if utils.salvar_config(config):
             QMessageBox.information(self, "Sucesso", "Sistema salvo com sucesso!")
@@ -744,6 +798,13 @@ class ProcessesDialog(QDialog):
 
         self.sig_perguntar_sobrescrever_storage.connect(self._on_perguntar_storage)
         self.sig_perguntar_sobrescrever_backup.connect(self._on_perguntar_backup)
+
+        # Timer para animações de loading nos status
+        self.loading_timer = QTimer(self)
+        self.loading_timer.setInterval(400)
+        self.loading_timer.timeout.connect(self.atualizar_animacao_status)
+        self.base_status_text = ""
+        self.loading_state = 0
 
         self.init_ui()
 
@@ -834,16 +895,30 @@ class ProcessesDialog(QDialog):
         self.table.setItem(row, 0, item_nome)
         self.table.setItem(row, 1, item_tam)
 
+    def atualizar_animacao_status(self):
+        if not self.base_status_text:
+            return
+        frames = [" .  ", " .. ", " ...", "   "]
+        frame = frames[self.loading_state % len(frames)]
+        self.loading_state += 1
+        
+        texto_base = self.base_status_text.rstrip(" .")
+        self.lbl_status.setText(f"{texto_base}{frame}")
+
     def calc_finished(self):
+        self.loading_timer.stop()
         self.lbl_status.setText("Cálculo concluído.")
         self.atualizar_botoes()
 
     def atualizar_tamanhos_tabela(self):
         self.table.setRowCount(0)
-        self.lbl_status.setText("Calculando tamanhos... por favor aguarde.")
+        self.base_status_text = "Calculando tamanhos dos diretórios..."
+        self.lbl_status.setText(self.base_status_text)
+        self.loading_timer.start(300)
         
         pasta_raiz = self.config.get('pasta_raiz')
         if not pasta_raiz or not os.path.isdir(pasta_raiz):
+            self.loading_timer.stop()
             self.lbl_status.setText("Pasta raiz local inválida.")
             return
 
@@ -1018,6 +1093,10 @@ class ProcessesDialog(QDialog):
         self.progress_bar.setVisible(True)
         self.btn_cancelar.setVisible(True)
 
+        self.base_status_text = "Iniciando execução em lote..."
+        self.lbl_status.setText(self.base_status_text)
+        self.loading_timer.start(300)
+
         self.batch_worker = BatchWorker(
             task_type, 
             selected_folders, 
@@ -1033,9 +1112,16 @@ class ProcessesDialog(QDialog):
 
     def atualizar_progresso_lote(self, pct, desc):
         self.progress_bar.setValue(pct)
+        self.base_status_text = desc
         self.lbl_status.setText(desc)
+        if desc.strip().endswith("..."):
+            if not self.loading_timer.isActive():
+                self.loading_timer.start(300)
+        else:
+            self.loading_timer.stop()
 
     def finalizar_execucao_lote(self, sucessos, erros):
+        self.loading_timer.stop()
         self.progress_bar.setVisible(False)
         self.btn_cancelar.setVisible(False)
         self.bloqueiar_controles(False)
@@ -1060,6 +1146,7 @@ class ProcessesDialog(QDialog):
         )
         if reply == QMessageBox.StandardButton.Yes:
             if self.batch_worker:
+                self.loading_timer.stop()
                 self.batch_worker.cancel_event.set()
                 self.lbl_status.setText("Execução cancelada pelo usuário.")
                 self.progress_bar.setVisible(False)
@@ -1191,6 +1278,14 @@ class MainWindow(QMainWindow):
         self.sobrescrever_event = threading.Event()
         self.sig_perguntar_sobrescrever.connect(self._on_perguntar_sobrescrever)
 
+        # Timer para animações de loading nos logs
+        self.loading_timer = QTimer(self)
+        self.loading_timer.setInterval(400)
+        self.loading_timer.timeout.connect(self.atualizar_animacao_loading)
+        self.ultimo_texto_carregando = ""
+        self.ultimo_estilo_carregando = "info"
+        self.loading_state = 0
+
         self.init_ui()
 
     def init_ui(self):
@@ -1224,7 +1319,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.lbl_titulo)
         # Logo Image
         self.lbl_logo = QLabel()
-        logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+        logo_path = obter_caminho_recurso(os.path.join("assets", "logo.png"))
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
             # Optionally scale the pixmap to a reasonable size
@@ -1311,6 +1406,35 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(self.frame_botoes)
 
+        # Layout para Opções de Hashes Existentes
+        self.layout_hash_existente = QHBoxLayout()
+        self.layout_hash_existente.setSpacing(8)
+        
+        self.chk_hash_existente = QCheckBox("Usar arquivo de hashes pré-existente (não recalcular)")
+        self.chk_hash_existente.setChecked(False)
+        self.chk_hash_existente.setVisible(False)
+        self.chk_hash_existente.stateChanged.connect(self.toggle_hash_existente_widgets)
+        
+        self.lbl_caminho_hash = QLabel("Arquivo:")
+        self.lbl_caminho_hash.setVisible(False)
+        
+        self.entry_caminho_hash = QLineEdit()
+        self.entry_caminho_hash.setReadOnly(True)
+        self.entry_caminho_hash.setPlaceholderText("Selecione o arquivo de hashes existente...")
+        self.entry_caminho_hash.setVisible(False)
+        
+        self.btn_selecionar_hash = QPushButton("Selecionar")
+        self.btn_selecionar_hash.setVisible(False)
+        self.btn_selecionar_hash.clicked.connect(self.selecionar_arquivo_hash)
+        
+        self.layout_hash_existente.addWidget(self.chk_hash_existente)
+        self.layout_hash_existente.addWidget(self.lbl_caminho_hash)
+        self.layout_hash_existente.addWidget(self.entry_caminho_hash, 1)
+        self.layout_hash_existente.addWidget(self.btn_selecionar_hash)
+        self.layout_hash_existente.addStretch()
+        
+        layout.addLayout(self.layout_hash_existente)
+
         # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
@@ -1335,7 +1459,37 @@ class MainWindow(QMainWindow):
     def toggle_tabela(self, state):
         self.table_dados.setVisible(self.chk_exibir_tabela.isChecked())
 
+    def toggle_hash_existente_widgets(self, state):
+        visible = self.chk_hash_existente.isChecked() and self.chk_hash_existente.isVisible()
+        self.lbl_caminho_hash.setVisible(visible)
+        self.entry_caminho_hash.setVisible(visible)
+        self.btn_selecionar_hash.setVisible(visible)
+
+    def selecionar_arquivo_hash(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar Arquivo de Hashes", "", "Arquivos de Texto (*.txt);;Todos os Arquivos (*.*)")
+        if file_path:
+            self.entry_caminho_hash.setText(file_path)
+
     def log(self, text, style="info"):
+        if hasattr(self, 'loading_timer') and self.loading_timer.isActive():
+            self.finalizar_animacao_loading()
+
+        limpo_text = text.strip()
+        if limpo_text.endswith("..."):
+            self.ultimo_texto_carregando = text.strip()
+            self.ultimo_estilo_carregando = style
+            self.loading_state = 0
+            
+            # Se o texto original tem uma quebra de linha inicial, preservamos escrevendo ela antes
+            if text.startswith("\n"):
+                self.escrever_linha_log("", style) # apenas insere newline
+                
+            self.escrever_linha_log(self.ultimo_texto_carregando, style)
+            self.loading_timer.start(300)
+        else:
+            self.escrever_linha_log(text, style)
+
+    def escrever_linha_log(self, text, style="info"):
         cursor = self.txt_resultado.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         
@@ -1356,6 +1510,51 @@ class MainWindow(QMainWindow):
         cursor.insertText("\n")
         self.txt_resultado.setTextCursor(cursor)
         self.txt_resultado.ensureCursorVisible()
+
+    def substituir_ultima_linha_log(self, text, style="info"):
+        cursor = self.txt_resultado.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        
+        if cursor.atBlockStart() and cursor.position() > 0:
+            cursor.movePosition(QTextCursor.MoveOperation.Left)
+            
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        cursor.removeSelectedText()
+        
+        color = "#e1e1e6" # default
+        font_weight = "normal"
+        if style == "success":
+            color = "#04D361"
+            font_weight = "bold"
+        elif style == "error":
+            color = "#E23E3E"
+            font_weight = "bold"
+        elif style == "warning":
+            color = "#FF8C00"
+            font_weight = "bold"
+            
+        html = f'<span style="color: {color}; font-weight: {font_weight};">{text}</span>'
+        cursor.insertHtml(html)
+        
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.txt_resultado.setTextCursor(cursor)
+        self.txt_resultado.ensureCursorVisible()
+
+    def atualizar_animacao_loading(self):
+        if not self.ultimo_texto_carregando:
+            return
+        frames = [" [|]", " [/]", " [-]", " [\\]"]
+        frame = frames[self.loading_state % len(frames)]
+        self.loading_state += 1
+        self.substituir_ultima_linha_log(f"{self.ultimo_texto_carregando}{frame}", self.ultimo_estilo_carregando)
+
+    def finalizar_animacao_loading(self):
+        if hasattr(self, 'loading_timer'):
+            self.loading_timer.stop()
+        if self.ultimo_texto_carregando:
+            self.substituir_ultima_linha_log(self.ultimo_texto_carregando, self.ultimo_estilo_carregando)
+            self.ultimo_texto_carregando = ""
 
     # --- CONSULTA ---
 
@@ -1379,13 +1578,14 @@ class MainWindow(QMainWindow):
         self.chk_auto.setVisible(False)
 
         self.txt_resultado.clear()
-        self.log("Consultando... aguarde.", "info")
+        self.log("Consultando o protocolo...", "info")
 
         self.query_worker = QueryWorker(protocolo)
         self.query_worker.finished_signal.connect(self.consulta_concluida)
         self.query_worker.start()
 
     def consulta_concluida(self, sucesso, resultado, dados_brutos, chaves, tabela):
+        self.finalizar_animacao_loading()
         self.btn_consultar.setEnabled(True)
         self.entry_protocolo.setEnabled(True)
         self.txt_resultado.clear()
@@ -1481,6 +1681,16 @@ class MainWindow(QMainWindow):
             )
             return
             
+        # Verifica se deve usar hash existente e valida o arquivo
+        if self.chk_hash_existente.isChecked():
+            caminho_hash = self.entry_caminho_hash.text().strip()
+            if not caminho_hash or not os.path.exists(caminho_hash):
+                QMessageBox.warning(self, "Aviso", "Por favor, selecione um arquivo de hashes pré-existente válido.")
+                return
+            self.ctx.caminho_hash_existente = caminho_hash
+        else:
+            self.ctx.caminho_hash_existente = ""
+
         self.ctx.numero_laudo = num_laudo
         self.ctx.ano = ano_laudo if ano_laudo else (self.ctx.dados.get('ano', datetime.now().year) if isinstance(self.ctx.dados, dict) else datetime.now().year)
 
@@ -1511,6 +1721,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(pct)
 
     def processo_concluido(self, sucesso, message):
+        self.finalizar_animacao_loading()
         self.progress_bar.setVisible(False)
         self.btn_cancelar_envio.setVisible(False)
         self.definir_estado_controles(True)
@@ -1531,6 +1742,7 @@ class MainWindow(QMainWindow):
         self.upload_worker.start()
 
     def upload_concluido(self, sucesso, destino_ou_erro):
+        self.finalizar_animacao_loading()
         self.progress_bar.setVisible(False)
         self.btn_cancelar_envio.setVisible(False)
         self.definir_estado_controles(True)
@@ -1554,6 +1766,7 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
+            self.finalizar_animacao_loading()
             self.ctx.cancel_event.set()
             self.definir_estado_controles(True)
             self.btn_cancelar_envio.setVisible(False)
@@ -1727,6 +1940,8 @@ class MainWindow(QMainWindow):
         self.btn_abrir_dir.setVisible(False)
         self.btn_enviar.setVisible(False)
         self.chk_auto.setVisible(False)
+        self.chk_hash_existente.setVisible(False)
+        self.toggle_hash_existente_widgets(0)
 
         if self.ctx.caminho_base:
             self.chk_auto.setVisible(True)
@@ -1735,6 +1950,8 @@ class MainWindow(QMainWindow):
                 self.btn_abrir_dir.setVisible(True)
                 if utils.tentar_restaurar_processamento(self.ctx):
                     self.btn_reprocessar.setVisible(True)
+                    self.chk_hash_existente.setVisible(True)
+                    self.toggle_hash_existente_widgets(0)
                     self.btn_enviar.setVisible(True)
                     self.btn_enviar.setEnabled(True)
                     if self.verificar_se_ja_enviado(self.ctx):
@@ -1743,6 +1960,8 @@ class MainWindow(QMainWindow):
                         self.btn_enviar.setText("2. Enviar p/ Storage")
                 else:
                     self.btn_processar.setVisible(True)
+                    self.chk_hash_existente.setVisible(True)
+                    self.toggle_hash_existente_widgets(0)
             else:
                 self.btn_criar_dir.setVisible(True)
                 self.btn_criar_dir.setEnabled(True)
@@ -1756,6 +1975,8 @@ class MainWindow(QMainWindow):
         self.btn_reprocessar.setEnabled(ativo)
         self.btn_enviar.setEnabled(ativo)
         self.chk_auto.setEnabled(ativo)
+        self.chk_hash_existente.setEnabled(ativo)
+        self.btn_selecionar_hash.setEnabled(ativo)
 
     def abrir_configuracoes(self):
         dlg = SettingsDialog(self)
@@ -1774,7 +1995,22 @@ class MainWindow(QMainWindow):
 # ---------------------------------------------------------------------------
 
 def iniciar_interface():
+    # Hack para forçar o ícone correto na barra de tarefas do Windows
+    if sys.platform == 'win32':
+        import ctypes
+        try:
+            myappid = 'jonasmsjunior.gad.app.1.0'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass
+
     app = QApplication(sys.argv)
+    
+    # Define o ícone global da aplicação
+    icon_path = obter_caminho_recurso(os.path.join("assets", "gad.ico"))
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+
     # Carrega tema salvo (Dark padrão)
     cfg = utils.carregar_config()
     tema = cfg.get('tema', 'Dark')

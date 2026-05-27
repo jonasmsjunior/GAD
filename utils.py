@@ -6,13 +6,16 @@ from datetime import datetime
 ARQUIVO_CONFIG = 'config.json'
 
 def carregar_config():
+    config = {}
     if os.path.exists(ARQUIVO_CONFIG):
         try:
             with open(ARQUIVO_CONFIG, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                config = json.load(f)
         except Exception as e:
             print(f"Erro ao ler {ARQUIVO_CONFIG}: {e}")
-    return {}
+    if 'tipos_hash' not in config:
+        config['tipos_hash'] = ["SHA-256"]
+    return config
 
 def salvar_config(config):
     try:
@@ -85,6 +88,7 @@ class ProtocoloContext:
     auto_enviar: bool = True
     numero_laudo: str = ""
     cancel_event: Optional[threading.Event] = None
+    caminho_hash_existente: str = ""
 
     def reset(self):
         """Reseta todos os campos para o estado inicial."""
@@ -97,6 +101,7 @@ class ProtocoloContext:
         self.caminho_zip = ""
         self.senha = ""
         self.auto_enviar = True
+        self.caminho_hash_existente = ""
         if self.cancel_event:
             self.cancel_event.clear()
 

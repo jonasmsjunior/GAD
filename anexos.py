@@ -16,10 +16,27 @@ def calcular_sha256(caminho_arquivo):
             sha256.update(bloco)
     return sha256.hexdigest()
 
-def processar_anexos(pasta_base, protocolo, ano, numero_laudo, callback_status=None, callback_progresso=None):
+def calcular_hashes_multiplos(caminho_arquivo, algoritmos):
+    hash_objs = {}
+    for algo in algoritmos:
+        name = algo.lower().replace("-", "")
+        try:
+            hash_objs[algo] = hashlib.new(name)
+        except ValueError:
+            pass
+            
+    with open(caminho_arquivo, "rb") as f:
+        for bloco in iter(lambda: f.read(4096), b""):
+            for obj in hash_objs.values():
+                obj.update(bloco)
+                
+    return {algo: obj.hexdigest() for algo, obj in hash_objs.items()}
+
+def processar_anexos(pasta_base, protocolo, ano, numero_laudo, callback_status=None, callback_progresso=None, caminho_hash_existente=""):
     """
     Realiza o processamento:
     1. Calcula hash dos arquivos dentro do diretório de anexo e salva o hashes.txt no próprio diretório.
+       Alternativamente, copia um arquivo de hashes pré-existente se fornecido.
     2. Compacta todos os arquivos no diretório de anexo (com senha).
     3. Calcule a hash do arquivo compactado e gere o arquivo INFO.txt no diretório de anexo.
     """
@@ -34,11 +51,11 @@ def processar_anexos(pasta_base, protocolo, ano, numero_laudo, callback_status=N
     arquivo_info = os.path.join(pasta_anexo, 'INFO.txt')
     arquivo_hashes = os.path.join(pasta_anexo, 'hashes.txt')
     
-    # 1. Gerar Hashes dos arquivos em pasta_anexo (excluindo hashes.txt, INFO.txt e zips)
+    # 1. Gerar ou Copiar Hashes dos arquivos em pasta_anexo
     if callback_progresso:
-        callback_progresso(25, "Calculando hashes dos arquivos...")
+        callback_progresso(25, "Preparando arquivo de hashes...")
     elif callback_status:
-        callback_status("Calculando hashes dos arquivos...")
+        callback_status("Preparando arquivo de hashes...")
         
     # Remove hashes.txt anterior se existir para não dar erro
     if os.path.exists(arquivo_hashes):
@@ -47,17 +64,44 @@ def processar_anexos(pasta_base, protocolo, ano, numero_laudo, callback_status=N
         except Exception:
             pass
             
-    with open(arquivo_hashes, 'w', encoding='utf-8') as f:
-        for root, dirs, files in os.walk(pasta_anexo):
-            for file in files:
-                # Ignora hashes.txt, INFO.txt e qualquer ZIP
-                if file in ['hashes.txt', 'INFO.txt'] or file.endswith('.zip'):
-                    continue
-                filepath = os.path.join(root, file)
-                if os.path.isfile(filepath):
-                    hash_val = calcular_sha256(filepath)
-                    relpath = os.path.relpath(filepath, pasta_anexo)
-                    f.write(f"{hash_val} *{relpath}\n")
+    if caminho_hash_existente and os.path.exists(caminho_hash_existente):
+        if callback_progresso:
+            callback_progresso(25, f"Copiando hashes pré-existentes de {os.path.basename(caminho_hash_existente)}...")
+        elif callback_status:
+            callback_status("Copiando hashes pré-existentes...")
+        try:
+            shutil.copy2(caminho_hash_existente, arquivo_hashes)
+        except Exception as e:
+            raise Exception(f"Erro ao copiar arquivo de hashes existente: {e}")
+    else:
+        # Carrega configuração de tipos de hash a calcular
+        import utils
+        config = utils.carregar_config()
+        algoritmos = config.get('tipos_hash', ["SHA-256"])
+        if not algoritmos:
+            algoritmos = ["SHA-256"]
+            
+        if callback_progresso:
+            callback_progresso(25, f"Calculando hashes ({', '.join(algoritmos)}) dos arquivos...")
+        elif callback_status:
+            callback_status(f"Calculando hashes ({', '.join(algoritmos)})...")
+            
+        with open(arquivo_hashes, 'w', encoding='utf-8') as f:
+            for root, dirs, files in os.walk(pasta_anexo):
+                for file in files:
+                    # Ignora hashes.txt, INFO.txt e qualquer ZIP
+                    if file in ['hashes.txt', 'INFO.txt'] or file.endswith('.zip'):
+                        continue
+                    filepath = os.path.join(root, file)
+                    if os.path.isfile(filepath):
+                        hashes_calculados = calcular_hashes_multiplos(filepath, algoritmos)
+                        relpath = os.path.relpath(filepath, pasta_anexo)
+                        if len(algoritmos) == 1:
+                            algo = algoritmos[0]
+                            f.write(f"{hashes_calculados[algo]} *{relpath}\n")
+                        else:
+                            for algo in algoritmos:
+                                f.write(f"{algo}: {hashes_calculados[algo]} *{relpath}\n")
     
     hash_do_hashes = calcular_sha256(arquivo_hashes) if os.path.exists(arquivo_hashes) else ""
     

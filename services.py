@@ -22,7 +22,8 @@ def processar_anexos(ctx: utils.ProtocoloContext, callback_status=None, callback
             ctx.ano,
             ctx.numero_laudo,
             callback_status=callback_status,
-            callback_progresso=callback_progresso
+            callback_progresso=callback_progresso,
+            caminho_hash_existente=getattr(ctx, 'caminho_hash_existente', '')
         )
         ctx.caminho_zip = resultados.get('caminho_zip', '')
         ctx.hash_diretorio = resultados.get('hash_diretorio', '')

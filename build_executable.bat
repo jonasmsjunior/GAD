@@ -23,16 +23,17 @@ REM ----- 4. Ícone do executável -----
 set "ICON_ARG=--icon c:/projetos/gad/assets/gad.ico"
 
 REM ----- 5. Remove artefatos de builds anteriores -----
-if exist dist ( rmdir /s /q dist )
-if exist build ( rmdir /s /q build )
+if exist dist\gad.exe ( del /f /q dist\gad.exe )
+if exist build\gad ( rmdir /s /q build\gad )
 if exist gad.spec ( del /f /q gad.spec )
 
 REM ----- 6. Build com coleta completa e debug -----
-pyinstaller --clean --debug=all ^
+pyinstaller --clean --windowed --debug=all ^
     --name gad ^
     --onefile ^
     --add-data ".env;." ^
-    --add-data "venv\Lib\site-packages\PySide6\Qt\plugins;Qt\plugins" ^
+    --add-data "assets;assets" ^
+    --add-data "venv\Lib\site-packages\PySide6\plugins;Qt\plugins" ^
     %ICON_ARG% ^
     --paths venv\Lib\site-packages ^
     --hidden-import=requests ^

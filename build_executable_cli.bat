@@ -19,8 +19,8 @@ if not exist requirements.txt (
 pip install -r requirements.txt
 
 REM ----- 3. Remove artefatos de builds anteriores -----
-if exist dist ( rmdir /s /q dist )
-if exist build ( rmdir /s /q build )
+if exist dist\gad_cli.exe ( del /f /q dist\gad_cli.exe )
+if exist build\gad_cli ( rmdir /s /q build\gad_cli )
 if exist gad_cli.spec ( del /f /q gad_cli.spec )
 
 REM ----- 4. Build **console** (sem a flag --windowed) -----
@@ -29,6 +29,7 @@ pyinstaller ^
     --name gad_cli ^
     --onefile ^
     --add-data ".env;." ^
+    --add-data "assets;assets" ^
     --paths venv\Lib\site-packages ^
     --hidden-import=requests ^
     --hidden-import=urllib3 ^

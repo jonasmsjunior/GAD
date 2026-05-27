@@ -1,0 +1,6 @@
+pyinstaller
+requests
+tabulate
+python-dotenv
+pyzipper
+PySide6
