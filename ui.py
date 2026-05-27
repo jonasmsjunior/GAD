@@ -1005,8 +1005,8 @@ class ProcessesDialog(QDialog):
         if not local_ctx.caminho_base or not os.path.exists(local_ctx.caminho_base):
             return False
             
-        pasta_anexo = os.path.join(local_ctx.caminho_base, 'Relatorios', 'Anexo Digital')
-        arquivo_info = os.path.join(pasta_anexo, 'INFO.txt')
+        pasta_relatorios = os.path.join(local_ctx.caminho_base, 'Relatorios')
+        arquivo_info = os.path.join(pasta_relatorios, 'INFO.txt')
         if not os.path.exists(arquivo_info):
             return False
             
@@ -1901,8 +1901,8 @@ class MainWindow(QMainWindow):
         if not local_ctx.caminho_base or not os.path.exists(local_ctx.caminho_base):
             return False
             
-        pasta_anexo = os.path.join(local_ctx.caminho_base, 'Relatorios', 'Anexo Digital')
-        arquivo_info = os.path.join(pasta_anexo, 'INFO.txt')
+        pasta_relatorios = os.path.join(local_ctx.caminho_base, 'Relatorios')
+        arquivo_info = os.path.join(pasta_relatorios, 'INFO.txt')
         if not os.path.exists(arquivo_info):
             return False
             

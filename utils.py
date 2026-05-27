@@ -112,8 +112,8 @@ def tentar_restaurar_processamento(ctx: ProtocoloContext) -> bool:
     if not ctx.caminho_base or not os.path.isdir(ctx.caminho_base):
         return False
         
-    pasta_anexo = os.path.join(ctx.caminho_base, 'Relatorios', 'Anexo Digital')
-    arquivo_info = os.path.join(pasta_anexo, 'INFO.txt')
+    pasta_relatorios = os.path.join(ctx.caminho_base, 'Relatorios')
+    arquivo_info = os.path.join(pasta_relatorios, 'INFO.txt')
     
     if not os.path.exists(arquivo_info):
         return False
@@ -135,7 +135,7 @@ def tentar_restaurar_processamento(ctx: ProtocoloContext) -> bool:
                     url_storage = linha.split(":", 1)[1].strip()
                     
         if nome_zip and senha and url_storage:
-            caminho_zip = os.path.join(pasta_anexo, nome_zip)
+            caminho_zip = os.path.join(pasta_relatorios, nome_zip)
             if os.path.exists(caminho_zip):
                 ctx.caminho_zip = caminho_zip
                 ctx.senha = senha

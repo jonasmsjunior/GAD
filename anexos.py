@@ -47,8 +47,8 @@ def processar_anexos(pasta_base, protocolo, ano, numero_laudo, callback_status=N
         os.makedirs(pasta_anexo, exist_ok=True)
         
     nome_zip = f"AnexoDigital_LP_{ano}.{numero_laudo}.zip"
-    caminho_zip = os.path.join(pasta_anexo, nome_zip)
-    arquivo_info = os.path.join(pasta_anexo, 'INFO.txt')
+    caminho_zip = os.path.join(pasta_relatorios, nome_zip)
+    arquivo_info = os.path.join(pasta_relatorios, 'INFO.txt')
     arquivo_hashes = os.path.join(pasta_anexo, 'hashes.txt')
     
     # 1. Gerar ou Copiar Hashes dos arquivos em pasta_anexo
