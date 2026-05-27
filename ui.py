@@ -803,7 +803,7 @@ class BatchWorker(QThread):
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Sistema do GAD")
+        self.setWindowTitle("Configurações do GAD")
         self.setMinimumWidth(550)
         self.init_ui()
 
@@ -860,7 +860,7 @@ class SettingsDialog(QDialog):
         # Buttons
         h_buttons = QHBoxLayout()
         h_buttons.addStretch()
-        self.btn_salvar = QPushButton("Salvar Sistema")
+        self.btn_salvar = QPushButton("Salvar Configurações")
         self.btn_salvar.setObjectName("btn_consultar") # cyan accent
         self.btn_salvar.clicked.connect(self.salvar)
         self.btn_cancelar = QPushButton("Cancelar")
@@ -919,10 +919,73 @@ class SettingsDialog(QDialog):
             'tipos_hash': tipos_hash
         }
         if utils.salvar_config(config):
-            QMessageBox.information(self, "Sucesso", "Sistema salvo com sucesso!")
+            QMessageBox.information(self, "Sucesso", "Configurações salvas com sucesso!")
             self.accept()
         else:
-            QMessageBox.critical(self, "Erro", "Não foi possível salvar o sistema.")
+            QMessageBox.critical(self, "Erro", "Não foi possível salvar as configurações.")
+
+
+# ---------------------------------------------------------------------------
+# About Dialog (Sobre o Sistema)
+# ---------------------------------------------------------------------------
+
+class SobreDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Sobre o GAD")
+        self.resize(620, 500)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Informações sobre o GAD
+        self.text_info = QTextEdit()
+        self.text_info.setReadOnly(True)
+        
+        html_content = """
+        <h2 style='color: #00ADB5; margin-bottom: 5px;'>GAD - Gerenciador de Anexo Digital</h2>
+        <p style='font-size: 11pt; line-height: 1.4;'>
+            O GAD é uma ferramenta desenvolvida para otimizar e padronizar o processamento de laudos e anexos periciais.
+            Ele permite a consulta de dados do protocolo, a estruturação de pastas locais, a compactação de arquivos
+            no formato <b>RAR criptografado com senha</b> (incluindo ocultação de cabeçalhos via WinRAR) e o envio direto
+            ao servidor de Storage da Rede.
+        </p>
+
+        <h3 style='color: #00ADB5; margin-top: 15px;'>🔧 Configurações Básicas</h3>
+        <p style='font-size: 10pt; line-height: 1.4;'>
+            Para configurar o sistema pela primeira vez, acesse o menu <b>Configurações &rarr; Configurações...</b> e defina os seguintes campos:
+        </p>
+        <ul style='font-size: 10pt; line-height: 1.4;'>
+            <li><b>Pasta Raiz Local:</b> O diretório em seu computador onde os processos locais serão organizados e os arquivos serão extraídos.</li>
+            <li><b>Destino Storage (Rede):</b> O caminho UNC da rede (ex: <code>\\\\servidor\\Web\\laudos</code>) onde os anexos finais compactados serão armazenados.</li>
+            <li><b>Destino de Backup:</b> A pasta de rede ou local utilizada para arquivar os processos finalizados.</li>
+            <li><b>Tipos de Hash:</b> Os algoritmos para geração de assinaturas digitais dos arquivos (ex: SHA-256).</li>
+        </ul>
+
+        <h3 style='color: #00ADB5; margin-top: 15px;'>📖 Como Utilizar</h3>
+        <ol style='font-size: 10pt; line-height: 1.4; padding-left: 20px;'>
+            <li style='margin-bottom: 5px;'><b>Consultar Protocolo:</b> Digite o número do protocolo no campo principal e clique em <b>Consultar</b> para buscar os dados de laudo diretamente no banco de dados.</li>
+            <li style='margin-bottom: 5px;'><b>Criar Estrutura:</b> Clique em <b>Criar Estrutura de Pastas</b>. O sistema criará a pasta do protocolo no seu diretório raiz local contendo as pastas <i>Extração</i> e <i>Relatorios</i>.</li>
+            <li style='margin-bottom: 5px;'><b>Adicionar Anexos:</b> Salve ou extraia todos os arquivos que compõem o anexo digital na pasta <i>Relatorios/Anexo Digital</i> recém-criada.</li>
+            <li style='margin-bottom: 5px;'><b>Processar Anexos:</b> Clique em <b>1. Processar Anexos (RAR/Hash)</b>. O sistema calculará os hashes de todos os anexos, gerará uma senha segura e compactará a pasta no formato RAR utilizando o WinRAR de forma invisível.</li>
+            <li style='margin-bottom: 5px;'><b>Enviar ao Storage:</b> O arquivo RAR gerado será enviado de forma automática ou manual para o servidor de armazenamento da rede através do botão <b>2. Enviar p/ Storage</b>.</li>
+            <li style='margin-bottom: 5px;'><b>Limpeza Local (Opcional):</b> Após o envio bem-sucedido, use o botão <b>Limpar Arquivos Locais</b> para apagar os arquivos temporários brutos e o RAR local, mantendo apenas as informações básicas (INFO.txt) e economizando espaço.</li>
+        </ol>
+        """
+        self.text_info.setHtml(html_content)
+        layout.addWidget(self.text_info)
+
+        # OK button
+        h_buttons = QHBoxLayout()
+        h_buttons.addStretch()
+        self.btn_fechar = QPushButton("Ok")
+        self.btn_fechar.setObjectName("btn_consultar") # cyan accent
+        self.btn_fechar.clicked.connect(self.accept)
+        h_buttons.addWidget(self.btn_fechar)
+        layout.addLayout(h_buttons)
 
 
 # ---------------------------------------------------------------------------
@@ -1494,13 +1557,14 @@ class MainWindow(QMainWindow):
         self.loading_state = 0
 
         self.init_ui()
+        QTimer.singleShot(200, self.verificar_configuracoes_iniciais)
 
     def init_ui(self):
         # Menu Bar
         menu_bar = self.menuBar()
-        menu_config = menu_bar.addMenu("Sistema")
+        menu_config = menu_bar.addMenu("Configurações")
         
-        action_config = QAction("Sistema...", self)
+        action_config = QAction("Configurações...", self)
         action_config.triggered.connect(self.abrir_configuracoes)
         
         action_lista = QAction("Processos locais...", self)
@@ -1509,6 +1573,11 @@ class MainWindow(QMainWindow):
         menu_config.addAction(action_config)
         menu_config.addSeparator()
         menu_config.addAction(action_lista)
+
+        menu_sobre = menu_bar.addMenu("Sobre")
+        action_sobre = QAction("Sobre o Sistema...", self)
+        action_sobre.triggered.connect(self.abrir_sobre)
+        menu_sobre.addAction(action_sobre)
 
         # Central Widget
         self.central_widget = QWidget()
@@ -2238,6 +2307,25 @@ class MainWindow(QMainWindow):
         dlg.exec()
         # Atualiza botões da janela principal quando fechar a lista
         self.atualizar_botoes_gui()
+
+    def abrir_sobre(self):
+        dlg = SobreDialog(self)
+        dlg.exec()
+
+    def verificar_configuracoes_iniciais(self):
+        # As configurações são consideradas incompletas se as pastas raiz, backup ou storage não estiverem preenchidas
+        raiz = self.config.get('pasta_raiz', '').strip()
+        storage = self.config.get('destino_storage', '').strip()
+        backup = self.config.get('destino_backup', '').strip()
+        
+        if not raiz or not storage or not backup:
+            QMessageBox.warning(
+                self,
+                "Aviso de Configuração",
+                "Para o total funcionamento é necessário que sejam feitas as configurações do sistema.",
+                QMessageBox.StandardButton.Ok
+            )
+            self.abrir_configuracoes()
 
 
 # ---------------------------------------------------------------------------
