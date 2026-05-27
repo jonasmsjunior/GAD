@@ -3,7 +3,38 @@ import secrets
 import string
 import hashlib
 import shutil
-import pyzipper
+import winreg
+import subprocess
+
+def obter_caminho_winrar():
+    # Tenta obter do registro do Windows
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WinRAR.exe") as h:
+            val, _ = winreg.QueryValueEx(h, "")
+            if os.path.exists(val):
+                return val
+    except OSError:
+        pass
+        
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WinRAR.exe") as h:
+            val, _ = winreg.QueryValueEx(h, "")
+            if os.path.exists(val):
+                return val
+    except OSError:
+        pass
+        
+    # Fallbacks padrão
+    fallbacks = [
+        r"C:\Program Files\WinRAR\WinRAR.exe",
+        r"C:\Program Files (x86)\WinRAR\WinRAR.exe",
+        r"C:\Program Files\WinRAR\rar.exe",
+        r"C:\Program Files (x86)\WinRAR\rar.exe"
+    ]
+    for f in fallbacks:
+        if os.path.exists(f):
+            return f
+    return None
 
 def gerar_senha_segura(tamanho=16):
     caracteres = string.ascii_letters + string.digits
@@ -46,7 +77,7 @@ def processar_anexos(pasta_base, protocolo, ano, numero_laudo, callback_status=N
     if not os.path.exists(pasta_anexo):
         os.makedirs(pasta_anexo, exist_ok=True)
         
-    nome_zip = f"AnexoDigital_LP_{ano}.{numero_laudo}.zip"
+    nome_zip = f"AnexoDigital_LP_{ano}.{numero_laudo}.rar"
     caminho_zip = os.path.join(pasta_relatorios, nome_zip)
     arquivo_info = os.path.join(pasta_relatorios, 'INFO.txt')
     arquivo_hashes = os.path.join(pasta_anexo, 'hashes.txt')
@@ -89,8 +120,8 @@ def processar_anexos(pasta_base, protocolo, ano, numero_laudo, callback_status=N
         with open(arquivo_hashes, 'w', encoding='utf-8') as f:
             for root, dirs, files in os.walk(pasta_anexo):
                 for file in files:
-                    # Ignora hashes.txt, INFO.txt e qualquer ZIP
-                    if file in ['hashes.txt', 'INFO.txt'] or file.endswith('.zip'):
+                    # Ignora hashes.txt, INFO.txt e qualquer ZIP/RAR
+                    if file in ['hashes.txt', 'INFO.txt'] or file.endswith('.zip') or file.endswith('.rar'):
                         continue
                     filepath = os.path.join(root, file)
                     if os.path.isfile(filepath):
@@ -107,31 +138,42 @@ def processar_anexos(pasta_base, protocolo, ano, numero_laudo, callback_status=N
     
     # 2. Compactar
     if callback_progresso:
-        callback_progresso(50, "Compactando arquivos com senha...")
+        callback_progresso(50, "Compactando arquivos com senha (WinRAR)...")
     elif callback_status:
-        callback_status("Compactando e Criptografando...")
+        callback_status("Compactando e Criptografando (WinRAR)...")
         
     senha = gerar_senha_segura(16)
     hash_diretorio = gerar_senha_segura(16) # Hash aleatorio pro storage
     
-    # Se o zip já existe, remove antes de compactar
+    # Se o rar já existe, remove antes de compactar
     if os.path.exists(caminho_zip):
         try:
             os.remove(caminho_zip)
         except Exception:
             pass
             
-    with pyzipper.AESZipFile(caminho_zip, 'w', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
-        zf.setpassword(senha.encode('utf-8'))
+    winrar_exe = obter_caminho_winrar()
+    if not winrar_exe:
+        raise Exception("O WinRAR não foi encontrado no sistema. Por favor, instale o WinRAR para prosseguir.")
         
-        for root, dirs, files in os.walk(pasta_anexo):
-            for file in files:
-                # Ignora o próprio zip e INFO.txt
-                if file == nome_zip or file == 'INFO.txt' or file.endswith('.zip.tmp'):
-                    continue
-                filepath = os.path.join(root, file)
-                relpath = os.path.relpath(filepath, pasta_anexo)
-                zf.write(filepath, relpath)
+    dir_path = os.path.dirname(winrar_exe)
+    rar_exe = os.path.join(dir_path, "rar.exe")
+    if not os.path.exists(rar_exe):
+        rar_exe = winrar_exe
+        
+    creationflags = 0
+    if os.name == 'nt':
+        try:
+            creationflags = subprocess.CREATE_NO_WINDOW
+        except AttributeError:
+            creationflags = 0x08000000
+            
+    # Executa o rar/WinRAR para compactar com senha e criptografar o cabeçalho (-hp)
+    cmd = [rar_exe, "a", "-r", f"-hp{senha}", caminho_zip, "*"]
+    
+    res = subprocess.run(cmd, cwd=pasta_anexo, capture_output=True, text=True, creationflags=creationflags)
+    if res.returncode != 0:
+        raise Exception(f"Erro ao compactar com WinRAR: {res.stderr or res.stdout}")
                 
     # 3. Hash do Compactado e Info
     if callback_progresso:

@@ -618,7 +618,7 @@ class BatchWorker(QThread):
                     
                     if self.auto_enviar:
                         self.progress_signal.emit(int(((i + 0.5) * 100) / total), f"[{i+1}/{total}] {nome_pasta} - Enviando Storage...")
-                        self.log_signal.emit("   -> Enviando arquivo ZIP ao Storage...", "info")
+                        self.log_signal.emit("   -> Enviando arquivo compactado ao Storage...", "info")
                         destino = services.enviar_ao_storage(
                             local_ctx, 
                             confirmar_sobrescrever=self.parent_dlg.perguntar_sobrescrever_storage_lote, 
@@ -641,7 +641,7 @@ class BatchWorker(QThread):
                 if not local_ctx.caminho_zip or not os.path.exists(local_ctx.caminho_zip):
                     utils.tentar_restaurar_processamento(local_ctx)
                     if not local_ctx.caminho_zip or not os.path.exists(local_ctx.caminho_zip):
-                        self.log_signal.emit("   └─ [ERRO] Arquivo ZIP do anexo digital não foi encontrado localmente. Processe primeiro.", "error")
+                        self.log_signal.emit("   └─ [ERRO] Arquivo RAR do anexo digital não foi encontrado localmente. Processe primeiro.", "error")
                         erros += 1
                         continue
 
@@ -1353,7 +1353,7 @@ class ProcessesDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "Confirmar Backup & Limpeza",
-            f"Deseja realmente compactar e fazer backup de todos os {len(folders)} processos selecionados?\nApós a conclusão, as pastas locais originais e os arquivos ZIP locais serão APAGADOS permanentemente.",
+            f"Deseja realmente compactar e fazer backup de todos os {len(folders)} processos selecionados?\nApós a conclusão, as pastas locais originais e os arquivos compactados locais serão APAGADOS permanentemente.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -1507,7 +1507,7 @@ class MainWindow(QMainWindow):
         self.btn_recriar_dir.clicked.connect(self.recriar_diretorios)
         self.btn_recriar_dir.setVisible(False)
 
-        self.btn_processar = QPushButton("1. Processar Anexos (ZIP/Hash)")
+        self.btn_processar = QPushButton("1. Processar Anexos (RAR/Hash)")
         self.btn_processar.setObjectName("btn_processar")
         self.btn_processar.clicked.connect(self.processar_anexos_gui)
         self.btn_processar.setVisible(False)

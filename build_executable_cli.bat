@@ -38,7 +38,6 @@ pyinstaller ^
     --hidden-import=certifi ^
     --hidden-import=tabulate ^
     --hidden-import=dotenv ^
-    --hidden-import=pyzipper ^
     --collect-all=requests ^
     --collect-all=urllib3 ^
     --collect-all=idna ^
@@ -46,7 +45,6 @@ pyinstaller ^
     --collect-all=certifi ^
     --collect-all=tabulate ^
     --collect-all=dotenv ^
-    --collect-all=pyzipper ^
     main.py
 
 popd
