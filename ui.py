@@ -368,13 +368,96 @@ class UploadWorker(QThread):
             self.finished_signal.emit(False, str(e))
 
 
+class NetworkCheckWorker(QThread):
+    finished_signal = Signal(bool)
+
+    def __init__(self, ctx, config):
+        super().__init__()
+        self.ctx = ctx
+        self.config = config
+
+    def run(self):
+        if not self.ctx.caminho_base or not os.path.exists(self.ctx.caminho_base):
+            self.finished_signal.emit(False)
+            return
+            
+        pasta_relatorios = os.path.join(self.ctx.caminho_base, 'Relatorios')
+        arquivo_info = os.path.join(pasta_relatorios, 'INFO.txt')
+        if not os.path.exists(arquivo_info):
+            self.finished_signal.emit(False)
+            return
+            
+        url_storage = None
+        try:
+            with open(arquivo_info, 'r', encoding='utf-8') as f:
+                for linha in f:
+                    linha = linha.strip()
+                    if linha.startswith("URL Storage:"):
+                        url_storage = linha.split(":", 1)[1].strip()
+                        break
+        except Exception:
+            self.finished_signal.emit(False)
+            return
+            
+        if not url_storage or "/laudos/" not in url_storage:
+            self.finished_signal.emit(False)
+            return
+            
+        caminho_relativo = url_storage.split("/laudos/", 1)[1]
+        partes = caminho_relativo.split('/')
+        
+        storage_base = self.config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos')
+        destino_arquivo = os.path.join(storage_base, *partes)
+        
+        try:
+            exists = os.path.exists(destino_arquivo)
+            self.finished_signal.emit(exists)
+        except Exception:
+            self.finished_signal.emit(False)
+
+
 class SizeCalculatorWorker(QThread):
-    item_calculated = Signal(str, str) # name, formatted size
+    item_calculated = Signal(str, str, str) # name, formatted size, status
     finished_signal = Signal()
 
-    def __init__(self, pasta_raiz):
+    def __init__(self, pasta_raiz, config):
         super().__init__()
         self.pasta_raiz = pasta_raiz
+        self.config = config
+
+    def verificar_se_ja_enviado_bg(self, local_ctx):
+        if not local_ctx.caminho_base or not os.path.exists(local_ctx.caminho_base):
+            return False
+            
+        pasta_relatorios = os.path.join(local_ctx.caminho_base, 'Relatorios')
+        arquivo_info = os.path.join(pasta_relatorios, 'INFO.txt')
+        if not os.path.exists(arquivo_info):
+            return False
+            
+        url_storage = None
+        try:
+            with open(arquivo_info, 'r', encoding='utf-8') as f:
+                for linha in f:
+                    linha = linha.strip()
+                    if linha.startswith("URL Storage:"):
+                        url_storage = linha.split(":", 1)[1].strip()
+                        break
+        except Exception:
+            return False
+            
+        if not url_storage or "/laudos/" not in url_storage:
+            return False
+            
+        caminho_relativo = url_storage.split("/laudos/", 1)[1]
+        partes = caminho_relativo.split('/')
+        
+        storage_base = self.config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos')
+        destino_arquivo = os.path.join(storage_base, *partes)
+        
+        try:
+            return os.path.exists(destino_arquivo)
+        except Exception:
+            return False
 
     def run(self):
         if not self.pasta_raiz or not os.path.isdir(self.pasta_raiz):
@@ -395,7 +478,31 @@ class SizeCalculatorWorker(QThread):
                                 except OSError:
                                     pass
                     tamanho_formatado = utils.formatar_tamanho(tamanho_bytes)
-                    self.item_calculated.emit(nome_pasta, tamanho_formatado)
+                    
+                    # Obter Situação (Não Processado, Processado, Enviado)
+                    situacao = "Não Processado"
+                    protocolo = ""
+                    if ".Prot_" in nome_pasta:
+                        protocolo = nome_pasta.split(".Prot_")[1]
+                    
+                    caminho_json = os.path.join(caminho_completo, 'Laudo', 'dados_protocolo.json')
+                    if os.path.exists(caminho_json):
+                        try:
+                            with open(caminho_json, 'r', encoding='utf-8') as f:
+                                dados = json.load(f)
+                            local_ctx = utils.ProtocoloContext()
+                            local_ctx.dados = dados
+                            local_ctx.protocolo = protocolo
+                            local_ctx.caminho_base = caminho_completo
+                            if utils.tentar_restaurar_processamento(local_ctx):
+                                if self.verificar_se_ja_enviado_bg(local_ctx):
+                                    situacao = "Enviado"
+                                else:
+                                    situacao = "Processado"
+                        except Exception:
+                            pass
+                    
+                    self.item_calculated.emit(nome_pasta, tamanho_formatado, situacao)
         except Exception as e:
             print(f"Erro ao calcular tamanhos: {e}")
         self.finished_signal.emit()
@@ -991,7 +1098,7 @@ class ProcessesDialog(QDialog):
         self.txt_console.setTextCursor(cursor)
         self.txt_console.ensureCursorVisible()
 
-    def popular_linha_tabela(self, nome_pasta, tamanho_formatado):
+    def popular_linha_tabela(self, nome_pasta, tamanho_formatado, situacao):
         row = self.table.rowCount()
         self.table.insertRow(row)
         
@@ -1010,16 +1117,6 @@ class ProcessesDialog(QDialog):
         item_tam.setFlags(item_tam.flags() ^ Qt.ItemFlag.ItemIsEditable)
         item_tam.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.table.setItem(row, 2, item_tam)
-        
-        local_ctx = self.obter_contexto_pasta(nome_pasta)
-        situacao = "Não Processado"
-        if local_ctx:
-            processado = utils.tentar_restaurar_processamento(local_ctx)
-            if processado:
-                if self.verificar_se_ja_enviado(local_ctx):
-                    situacao = "Enviado"
-                else:
-                    situacao = "Processado"
         
         item_sit = QTableWidgetItem(situacao)
         item_sit.setFlags(item_sit.flags() ^ Qt.ItemFlag.ItemIsEditable)
@@ -1060,7 +1157,7 @@ class ProcessesDialog(QDialog):
             self.lbl_status.setText("Pasta raiz local inválida.")
             return
 
-        self.calc_worker = SizeCalculatorWorker(pasta_raiz)
+        self.calc_worker = SizeCalculatorWorker(pasta_raiz, self.config)
         self.calc_worker.item_calculated.connect(self.popular_linha_tabela)
         self.calc_worker.finished_signal.connect(self.calc_finished)
         self.calc_worker.start()
@@ -1137,39 +1234,7 @@ class ProcessesDialog(QDialog):
                 folders.append(self.table.item(r, 1).text())
         return folders
 
-    def verificar_se_ja_enviado(self, local_ctx):
-        if not local_ctx.caminho_base or not os.path.exists(local_ctx.caminho_base):
-            return False
-            
-        pasta_relatorios = os.path.join(local_ctx.caminho_base, 'Relatorios')
-        arquivo_info = os.path.join(pasta_relatorios, 'INFO.txt')
-        if not os.path.exists(arquivo_info):
-            return False
-            
-        url_storage = None
-        try:
-            with open(arquivo_info, 'r', encoding='utf-8') as f:
-                for linha in f:
-                    linha = linha.strip()
-                    if linha.startswith("URL Storage:"):
-                        url_storage = linha.split(":", 1)[1].strip()
-                        break
-        except Exception:
-            return False
-            
-        if not url_storage or "/laudos/" not in url_storage:
-            return False
-            
-        caminho_relativo = url_storage.split("/laudos/", 1)[1]
-        partes = caminho_relativo.split('/')
-        
-        storage_base = self.config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos')
-        destino_arquivo = os.path.join(storage_base, *partes)
-        
-        try:
-            return os.path.exists(destino_arquivo)
-        except Exception:
-            return False
+
 
     def atualizar_botoes(self):
         folders = self.obter_pastas_selecionadas()
@@ -1413,6 +1478,7 @@ class MainWindow(QMainWindow):
         self.query_worker = None
         self.process_worker = None
         self.upload_worker = None
+        self.net_check_worker = None
         
         # Thread communication for overwrite prompt
         self.sobrescrever_result = False
@@ -1530,6 +1596,11 @@ class MainWindow(QMainWindow):
         self.btn_cancelar_envio.clicked.connect(self.cancelar_envio_gui)
         self.btn_cancelar_envio.setVisible(False)
 
+        self.btn_limpar_locais = QPushButton("Limpar Arquivos Locais")
+        self.btn_limpar_locais.setObjectName("btn_cancelar")
+        self.btn_limpar_locais.clicked.connect(self.limpar_arquivos_locais_gui)
+        self.btn_limpar_locais.setVisible(False)
+
         self.chk_auto = QCheckBox("Enviar automaticamente ao Storage")
         self.chk_auto.setChecked(True)
         self.chk_auto.stateChanged.connect(self.sync_auto)
@@ -1543,6 +1614,7 @@ class MainWindow(QMainWindow):
         self.frame_botoes.addWidget(self.btn_abrir_dir)
         self.frame_botoes.addWidget(self.btn_enviar)
         self.frame_botoes.addWidget(self.btn_cancelar_envio)
+        self.frame_botoes.addWidget(self.btn_limpar_locais)
         self.frame_botoes.addStretch()
 
         layout.addLayout(self.frame_botoes)
@@ -2038,40 +2110,6 @@ class MainWindow(QMainWindow):
         if self.ctx.caminho_base and os.path.exists(self.ctx.caminho_base):
             os.startfile(self.ctx.caminho_base)
 
-    def verificar_se_ja_enviado(self, local_ctx):
-        if not local_ctx.caminho_base or not os.path.exists(local_ctx.caminho_base):
-            return False
-            
-        pasta_relatorios = os.path.join(local_ctx.caminho_base, 'Relatorios')
-        arquivo_info = os.path.join(pasta_relatorios, 'INFO.txt')
-        if not os.path.exists(arquivo_info):
-            return False
-            
-        url_storage = None
-        try:
-            with open(arquivo_info, 'r', encoding='utf-8') as f:
-                for linha in f:
-                    linha = linha.strip()
-                    if linha.startswith("URL Storage:"):
-                        url_storage = linha.split(":", 1)[1].strip()
-                        break
-        except Exception:
-            return False
-            
-        if not url_storage or "/laudos/" not in url_storage:
-            return False
-            
-        caminho_relativo = url_storage.split("/laudos/", 1)[1]
-        partes = caminho_relativo.split('/')
-        
-        storage_base = self.config.get('destino_storage', r'\\periciadigital.ssp.to.gov.br\Web\laudos')
-        destino_arquivo = os.path.join(storage_base, *partes)
-        
-        try:
-            return os.path.exists(destino_arquivo)
-        except Exception:
-            return False
-
     def atualizar_botoes_gui(self):
         # Esconde todos primeiro
         self.btn_criar_dir.setVisible(False)
@@ -2082,6 +2120,7 @@ class MainWindow(QMainWindow):
         self.btn_enviar.setVisible(False)
         self.chk_auto.setVisible(False)
         self.chk_hash_existente.setVisible(False)
+        self.btn_limpar_locais.setVisible(False)
         self.toggle_hash_existente_widgets(0)
 
         if self.ctx.caminho_base:
@@ -2094,11 +2133,20 @@ class MainWindow(QMainWindow):
                     self.chk_hash_existente.setVisible(True)
                     self.toggle_hash_existente_widgets(0)
                     self.btn_enviar.setVisible(True)
-                    self.btn_enviar.setEnabled(True)
-                    if self.verificar_se_ja_enviado(self.ctx):
-                        self.btn_enviar.setText("Reenviar p/ Storage")
-                    else:
-                        self.btn_enviar.setText("2. Enviar p/ Storage")
+                    self.btn_limpar_locais.setVisible(True)
+                    self.btn_limpar_locais.setEnabled(True)
+                    
+                    # Verificação de rede assíncrona
+                    self.btn_enviar.setText("Verificando storage...")
+                    self.btn_enviar.setEnabled(False)
+                    
+                    if self.net_check_worker and self.net_check_worker.isRunning():
+                        self.net_check_worker.terminate()
+                        self.net_check_worker.wait()
+                        
+                    self.net_check_worker = NetworkCheckWorker(self.ctx, self.config)
+                    self.net_check_worker.finished_signal.connect(self.verificacao_storage_concluida)
+                    self.net_check_worker.start()
                 else:
                     self.btn_processar.setVisible(True)
                     self.chk_hash_existente.setVisible(True)
@@ -2106,6 +2154,13 @@ class MainWindow(QMainWindow):
             else:
                 self.btn_criar_dir.setVisible(True)
                 self.btn_criar_dir.setEnabled(True)
+
+    def verificacao_storage_concluida(self, ja_enviado):
+        self.btn_enviar.setEnabled(True)
+        if ja_enviado:
+            self.btn_enviar.setText("Reenviar p/ Storage")
+        else:
+            self.btn_enviar.setText("2. Enviar p/ Storage")
 
     def definir_estado_controles(self, ativo):
         self.entry_protocolo.setEnabled(ativo)
@@ -2118,11 +2173,65 @@ class MainWindow(QMainWindow):
         self.chk_auto.setEnabled(ativo)
         self.chk_hash_existente.setEnabled(ativo)
         self.btn_selecionar_hash.setEnabled(ativo)
+        self.btn_limpar_locais.setEnabled(ativo)
+
+    def limpar_arquivos_locais_gui(self):
+        if not self.ctx.caminho_base or not os.path.exists(self.ctx.caminho_base):
+            return
+            
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Limpeza Local",
+            "Esta ação apagará a pasta 'Extração' (com arquivos temporários brutos) e o arquivo RAR local deste protocolo para liberar espaço.\n\n"
+            "O arquivo de informações (INFO.txt) e a estrutura serão mantidos para permitir consultas futuras e reenvios.\n"
+            "Certifique-se de que o envio ao Storage foi concluído com sucesso antes de prosseguir.\n\n"
+            "Deseja liberar espaço local agora?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.No:
+            return
+            
+        import shutil
+        erros = []
+        
+        caminho_extracao = os.path.join(self.ctx.caminho_base, 'Extração')
+        if os.path.exists(caminho_extracao):
+            try:
+                shutil.rmtree(caminho_extracao)
+                os.makedirs(caminho_extracao, exist_ok=True)
+            except Exception as e:
+                erros.append(f"Erro ao limpar pasta Extração: {e}")
+                
+        if self.ctx.caminho_zip and os.path.exists(self.ctx.caminho_zip):
+            try:
+                os.remove(self.ctx.caminho_zip)
+                self.ctx.caminho_zip = ""
+            except Exception as e:
+                erros.append(f"Erro ao remover RAR local: {e}")
+        else:
+            pasta_anexo = os.path.join(self.ctx.caminho_base, 'Relatorios', 'Anexo Digital')
+            if os.path.exists(pasta_anexo):
+                for f in os.listdir(pasta_anexo):
+                    if f.endswith('.zip') or f.endswith('.rar'):
+                        try:
+                            os.remove(os.path.join(pasta_anexo, f))
+                        except Exception as e:
+                            erros.append(f"Erro ao remover arquivo {f}: {e}")
+                            
+        utils.tentar_restaurar_processamento(self.ctx)
+        self.atualizar_botoes_gui()
+        
+        if erros:
+            QMessageBox.warning(self, "Aviso com alertas", "Limpeza concluída com os seguintes alertas:\n" + "\n".join(erros))
+        else:
+            QMessageBox.information(self, "Limpeza Concluída", "Espaço em disco liberado com sucesso!")
 
     def abrir_configuracoes(self):
         dlg = SettingsDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.config = utils.carregar_config()
+            self.atualizar_botoes_gui()
 
     def listar_diretorios(self):
         dlg = ProcessesDialog(self.ctx, self.config, self)
